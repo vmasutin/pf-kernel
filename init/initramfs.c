@@ -677,7 +677,7 @@ struct __init acpi_table_header *acpi_find_dsdt_initrd(void)
 	file_mem = NULL;
 	file_looked_for = ramfs_dsdt_name;
 	err = unpack_to_rootfs((char *)initrd_start,
-			initrd_end - initrd_start, 1);
+			initrd_end - initrd_start);
 	file_looked_for = NULL;
 
 	if (err) {
