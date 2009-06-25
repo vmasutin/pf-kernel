@@ -174,8 +174,8 @@ static struct request *bfq_choose_req(struct bfq_data *bfqd,
 	else if (rq_is_meta(rq2) && !rq_is_meta(rq1))
 		return rq2;
 
-	s1 = rq1->sector;
-	s2 = rq2->sector;
+	s1 = blk_rq_pos(rq1);
+	s2 = blk_rq_pos(rq2);
 
 	last = bfqd->last_position;
 
@@ -315,7 +315,7 @@ static void bfq_updated_next_req(struct bfq_data *bfqd,
 	BUG_ON(entity->tree != &st->active);
 	BUG_ON(entity == entity->sched_data->active_entity);
 
-	new_budget = max(bfqq->max_budget, next_rq->hard_nr_sectors);
+	new_budget = max(bfqq->max_budget, blk_rq_sectors(next_rq));
 	entity->budget = new_budget;
 	bfq_log_bfqq(bfqd, bfqq, "budget=%lu", new_budget);
 	bfq_activate_bfqq(bfqd, bfqq);
@@ -347,7 +347,7 @@ static void bfq_add_rq_rb(struct request *rq)
 
 	if (!bfq_bfqq_busy(bfqq)) {
 		entity->budget = max(bfqq->max_budget,
-				     next_rq->hard_nr_sectors);
+				     blk_rq_sectors(next_rq));
 		bfq_add_bfqq_busy(bfqd, bfqq);
 	} else
 		bfq_updated_next_req(bfqd, bfqq);
@@ -387,7 +387,7 @@ static void bfq_activate_request(struct request_queue *q, struct request *rq)
 	struct bfq_data *bfqd = q->elevator->elevator_data;
 
 	bfqd->rq_in_driver++;
-	bfqd->last_position = rq->hard_sector + rq->hard_nr_sectors;
+	bfqd->last_position = blk_rq_pos(rq) + blk_rq_sectors(rq);
 }
 
 static void bfq_deactivate_request(struct request_queue *q, struct request *rq)
@@ -720,7 +720,7 @@ static void __bfq_bfqq_recalc_budget(struct bfq_data *bfqd,
 	next_rq = bfqq->next_rq;
 	if (next_rq != NULL)
 		bfqq->entity.budget = max(bfqq->max_budget,
-					  next_rq->hard_nr_sectors);
+					  blk_rq_sectors(next_rq));
 	bfq_log_bfqq(bfqd, bfqq, "budget=%lu (%d)", bfqq->entity.budget,
 		     bfq_bfqq_sync(bfqq));
 }
@@ -888,7 +888,7 @@ static struct bfq_queue *bfq_select_queue(struct bfq_data *bfqd)
 	 * serve them, keep the queue, otherwise expire it.
 	 */
 	if (next_rq != NULL) {
-		if (next_rq->hard_nr_sectors > bfq_bfqq_budget_left(bfqq)) {
+		if (blk_rq_sectors(next_rq) > bfq_bfqq_budget_left(bfqq)) {
 			reason = BFQ_BFQQ_BUDGET_EXHAUSTED;
 			goto expire;
 		} else
@@ -935,7 +935,7 @@ static int __bfq_dispatch_requests(struct bfq_data *bfqd,
 		if (rq == NULL)
 			rq = bfqq->next_rq;
 
-		if (rq->hard_nr_sectors > bfq_bfqq_budget_left(bfqq)) {
+		if (blk_rq_sectors(rq) > bfq_bfqq_budget_left(bfqq)) {
 			/*
 			 * Expire the queue for budget exhaustion, and
 			 * make sure that the next act_budget is enough
@@ -947,7 +947,7 @@ static int __bfq_dispatch_requests(struct bfq_data *bfqd,
 		}
 
 		/* Finally, insert request into driver dispatch list. */
-		bfq_bfqq_served(bfqq, rq->hard_nr_sectors);
+		bfq_bfqq_served(bfqq, blk_rq_sectors(rq));
 		bfq_dispatch_insert(bfqd->queue, rq);
 
 		dispatched++;
@@ -1315,10 +1315,10 @@ static void bfq_update_io_seektime(struct bfq_data *bfqd,
 	sector_t sdist;
 	u64 total;
 
-	if (cic->last_request_pos < rq->sector)
-		sdist = rq->sector - cic->last_request_pos;
+	if (cic->last_request_pos < blk_rq_pos(rq))
+		sdist = blk_rq_pos(rq) - cic->last_request_pos;
 	else
-		sdist = cic->last_request_pos - rq->sector;
+		sdist = cic->last_request_pos - blk_rq_pos(rq);
 
 	/*
 	 * Don't allow the seek distance to get too large from the
@@ -1391,7 +1391,7 @@ static void bfq_rq_enqueued(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 	bfq_update_io_seektime(bfqd, bfqq, cic, rq);
 	bfq_update_idle_window(bfqd, bfqq, cic);
 
-	cic->last_request_pos = rq->sector + rq->nr_sectors;
+	cic->last_request_pos = blk_rq_pos(rq) + blk_rq_sectors(rq);
 
 	if (bfqq == bfqd->active_queue && bfq_bfqq_wait_request(bfqq)) {
 		/*
@@ -1401,7 +1401,7 @@ static void bfq_rq_enqueued(struct bfq_data *bfqd, struct bfq_queue *bfqq,
 		 */
 		bfq_clear_bfqq_wait_request(bfqq);
 		del_timer(&bfqd->idle_slice_timer);
-		blk_start_queueing(bfqd->queue);
+		__blk_run_queue(bfqd->queue);
 	}
 }
 
@@ -1629,7 +1629,7 @@ static void bfq_kick_queue(struct work_struct *work)
 	unsigned long flags;
 
 	spin_lock_irqsave(q->queue_lock, flags);
-	blk_start_queueing(q);
+	__blk_run_queue(bfqd->queue);
 	spin_unlock_irqrestore(q->queue_lock, flags);
 }
 
