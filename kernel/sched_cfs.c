@@ -1212,6 +1212,7 @@ static inline void update_load_sub(struct load_weight *lw, unsigned long dec)
 
 #define WEIGHT_IDLEPRIO                3
 #define WMULT_IDLEPRIO         1431655765
+#define IO_WEIGHT			WMULT_IDLEPRIO
 
 /*
  * Nice levels are multiplicative, with a gentle 10% change for every
@@ -1779,7 +1780,8 @@ static inline void check_class_changed(struct rq *rq, struct task_struct *p,
 /* Used instead of source_load when we know the type == 0 */
 static unsigned long weighted_cpuload(const int cpu)
 {
-	return cpu_rq(cpu)->load.weight;
+	/* io weighted load */
+	return cpu_rq(cpu)->load.weight + (atomic_read(&(cpu_rq(cpu))->nr_iowait) * IO_WEIGHT);
 }
 
 /*
