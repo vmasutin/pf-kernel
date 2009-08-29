@@ -5315,6 +5315,8 @@ void __init sched_init(void)
 	int i;
 	int highest_cpu = 0;
 
+	printk("ZenSched: Using \"Brainfuck CPU Scheduler\"\n");
+
 	prio_ratios[0] = 100;
 	for (i = 1 ; i < PRIO_RANGE ; i++)
 		prio_ratios[i] = prio_ratios[i - 1] * 11 / 10;
