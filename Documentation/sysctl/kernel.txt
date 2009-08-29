@@ -49,6 +49,7 @@ show up in /proc/sys/kernel:
 - randomize_va_space
 - real-root-dev               ==> Documentation/initrd.txt
 - reboot-cmd                  [ SPARC only ]
+- rr_interval
 - rtsig-max
 - rtsig-nr
 - sem
@@ -330,6 +331,19 @@ reboot-cmd: (Sparc only)
 ??? This seems to be a way to give an argument to the Sparc
 ROM/Flash boot loader. Maybe to tell it what to do after
 rebooting. ???
+
+==============================================================
+
+rr_interval:
+
+This is the smallest duration that any cpu process scheduling unit
+will run for. Increasing this value can increase throughput of cpu
+bound tasks substantially but at the expense of increased latencies
+overall. This value is in milliseconds and the default value chosen
+depends on the number of cpus available at scheduler initialisation
+with a minimum of 6.
+
+Valid values are from 1-5000.
 
 ==============================================================
 

@@ -1193,7 +1193,11 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	 * parent's CPU). This avoids alot of nasty races.
 	 */
 	p->cpus_allowed = current->cpus_allowed;
+#ifdef CONFIG_CPU_BFS
+	p->rt_nr_cpus_allowed = current->rt_nr_cpus_allowed;
+#else
 	p->rt.nr_cpus_allowed = current->rt.nr_cpus_allowed;
+#endif
 	if (unlikely(!cpu_isset(task_cpu(p), p->cpus_allowed) ||
 			!cpu_online(task_cpu(p))))
 		set_task_cpu(p, smp_processor_id());

@@ -16,7 +16,11 @@
 #include <linux/mutex.h>
 #include <trace/events/sched.h>
 
-#define KTHREAD_NICE_LEVEL (-5)
+#ifdef CONFIG_CPU_BFS
+# define KTHREAD_NICE_LEVEL (0)
+#else
+# define KTHREAD_NICE_LEVEL (-5)
+#endif
 
 static DEFINE_SPINLOCK(kthread_create_lock);
 static LIST_HEAD(kthread_create_list);
@@ -170,7 +174,11 @@ void kthread_bind(struct task_struct *k, unsigned int cpu)
 	}
 	set_task_cpu(k, cpu);
 	k->cpus_allowed = cpumask_of_cpu(cpu);
+#ifdef CONFIG_CPU_BFS
+	k->rt_nr_cpus_allowed = 1;
+#else
 	k->rt.nr_cpus_allowed = 1;
+#endif
 	k->flags |= PF_THREAD_BOUND;
 }
 EXPORT_SYMBOL(kthread_bind);

@@ -144,13 +144,17 @@ extern u64 cpu_nr_migrations(int cpu);
 extern unsigned long get_parent_ip(unsigned long addr);
 
 struct seq_file;
+#ifdef CONFIG_CPU_CFS
 struct cfs_rq;
+#endif
 struct task_group;
 #ifdef CONFIG_SCHED_DEBUG
 extern void proc_sched_show_task(struct task_struct *p, struct seq_file *m);
 extern void proc_sched_set_task(struct task_struct *p);
+#ifdef CONFIG_CPU_CFS
 extern void
 print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq);
+#endif
 #else
 static inline void
 proc_sched_show_task(struct task_struct *p, struct seq_file *m)
@@ -159,10 +163,12 @@ proc_sched_show_task(struct task_struct *p, struct seq_file *m)
 static inline void proc_sched_set_task(struct task_struct *p)
 {
 }
+#ifdef CONFIG_CPU_CFS
 static inline void
 print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq)
 {
 }
+#endif
 #endif
 
 extern unsigned long long time_sync_thresh;
@@ -254,8 +260,13 @@ extern asmlinkage void schedule_tail(struct task_struct *prev);
 extern void init_idle(struct task_struct *idle, int cpu);
 extern void init_idle_bootup_task(struct task_struct *idle);
 
+#ifdef CONFIG_CPU_BFS
+extern int grunqueue_is_locked(void);
+extern void grq_unlock_wait(void);
+#else
 extern int runqueue_is_locked(void);
 extern void task_rq_unlock_wait(struct task_struct *p);
+#endif
 
 extern cpumask_var_t nohz_cpu_mask;
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ)
@@ -1021,6 +1032,8 @@ struct uts_namespace;
 struct rq;
 struct sched_domain;
 
+#ifdef CONFIG_CPU_CFS
+
 struct sched_class {
 	const struct sched_class *next;
 
@@ -1163,6 +1176,8 @@ struct sched_rt_entity {
 #endif
 };
 
+#endif /* CONFIG_CPU_CFS */
+
 struct task_struct {
 	volatile long state;	/* -1 unrunnable, 0 runnable, >0 stopped */
 	void *stack;
@@ -1172,17 +1187,32 @@ struct task_struct {
 
 	int lock_depth;		/* BKL lock depth */
 
-#ifdef CONFIG_SMP
-#ifdef __ARCH_WANT_UNLOCKED_CTXSW
+#if defined(CONFIG_CPU_BFS) || (defined(CONFIG_SMP) && defined(__ARCH_WANT_UNLOCKED_CTXSW))
 	int oncpu;
 #endif
+
+#ifdef CONFIG_CPU_BFS
+	int load_weight;	/* for niceness load balancing purposes */
+	int time_slice, first_time_slice;
+	unsigned long deadline;
+	struct list_head run_list;
 #endif
 
 	int prio, static_prio, normal_prio;
 	unsigned int rt_priority;
+
+#ifdef CONFIG_CPU_BFS
+	unsigned long long timestamp, last_ran;
+	u64 sched_time; /* sched_clock time spent running */
+
+	/* Compatibility crap */
+	int rt_nr_cpus_allowed;
+	unsigned long rt_timeout;
+#else
 	const struct sched_class *sched_class;
 	struct sched_entity se;
 	struct sched_rt_entity rt;
+#endif
 
 #ifdef CONFIG_PREEMPT_NOTIFIERS
 	/* list of struct preempt_notifier: */
@@ -1205,6 +1235,9 @@ struct task_struct {
 
 	unsigned int policy;
 	cpumask_t cpus_allowed;
+#ifdef CONFIG_HOTPLUG_CPU
+	cpumask_t unplugged_mask;
+#endif
 
 #ifdef CONFIG_PREEMPT_RCU
 	int rcu_read_lock_nesting;
@@ -1501,7 +1534,15 @@ struct task_struct {
 #define MAX_USER_RT_PRIO	100
 #define MAX_RT_PRIO		MAX_USER_RT_PRIO
 
-#define MAX_PRIO		(MAX_RT_PRIO + 40)
+#ifdef CONFIG_CPU_BFS
+# define PRIO_RANGE		(40)
+# define MAX_PRIO		(MAX_RT_PRIO + PRIO_RANGE)
+# define NORMAL_PRIO		MAX_RT_PRIO
+# define PRIO_LIMIT		((NORMAL_PRIO) + 1)
+#else
+# define MAX_PRIO		(MAX_RT_PRIO + 40)
+#endif
+
 #define DEFAULT_PRIO		(MAX_RT_PRIO + 20)
 
 static inline int rt_prio(int prio)
@@ -1785,7 +1826,7 @@ task_sched_runtime(struct task_struct *task);
 extern unsigned long long thread_group_sched_runtime(struct task_struct *task);
 
 /* sched_exec is called by processes performing an exec */
-#ifdef CONFIG_SMP
+#if defined(CONFIG_CPU_CFS) && defined(CONFIG_SMP)
 extern void sched_exec(void);
 #else
 #define sched_exec()   {}
@@ -2351,7 +2392,14 @@ static inline unsigned int task_cpu(const struct task_struct *p)
 	return task_thread_info(p)->cpu;
 }
 
+#ifdef CONFIG_CPU_BFS
+static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
+{
+	task_thread_info(p)->cpu = cpu;
+}
+#else
 extern void set_task_cpu(struct task_struct *p, unsigned int cpu);
+#endif
 
 #else
 

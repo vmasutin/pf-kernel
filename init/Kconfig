@@ -441,6 +441,10 @@ config LOG_BUF_SHIFT
 config HAVE_UNSTABLE_SCHED_CLOCK
 	bool
 
+source "init/Kconfig.cpu"
+
+if CPU_CFS
+
 config GROUP_SCHED
 	bool "Group CPU scheduler"
 	depends on EXPERIMENTAL
@@ -613,6 +617,8 @@ config CGROUP_MEM_RES_CTLR_SWAP
 	  size is 4096bytes, 512k per 1Gbytes of swap.
 
 endif # CGROUPS
+
+endif # CPU_CFS
 
 config MM_OWNER
 	bool

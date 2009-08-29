@@ -197,7 +197,7 @@ struct hrtimer_clock_base *lock_hrtimer_base(const struct hrtimer *timer,
  */
 static int hrtimer_get_target(int this_cpu, int pinned)
 {
-#ifdef CONFIG_NO_HZ
+#if defined(CONFIG_CPU_CFS) && defined(CONFIG_NO_HZ)
 	if (!pinned && get_sysctl_timer_migration() && idle_cpu(this_cpu)) {
 		int preferred_cpu = get_nohz_load_balancer();
 
