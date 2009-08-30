@@ -4,25 +4,15 @@
  */
 
 
-/*
- * Priority of a process goes from 0..MAX_PRIO-1, valid RT
- * priority is 0..MAX_RT_PRIO-1, and SCHED_NORMAL/SCHED_BATCH
- * tasks are in the range MAX_RT_PRIO..MAX_PRIO-1. Priority
- * values are inverted: lower p->prio value means higher priority.
- */
-
-#define MAX_USER_RT_PRIO	100
-#define MAX_RT_PRIO		MAX_USER_RT_PRIO
-#define PRIO_RANGE		(40)
-#define NORMAL_PRIO		MAX_RT_PRIO
-#define PRIO_LIMIT		((NORMAL_PRIO) + 1)
-#define MAX_PRIO		(MAX_RT_PRIO + PRIO_RANGE)
-
 #define rt_prio(prio)		unlikely((prio) < MAX_RT_PRIO)
 #define rt_task(p)		rt_prio((p)->prio)
 #define batch_task(p)		(unlikely((p)->policy == SCHED_BATCH))
-#define is_rt_policy(p)		((p) != SCHED_NORMAL && (p) != SCHED_BATCH)
+#define is_rt_policy(policy)	((policy) == SCHED_FIFO || \
+					(policy) == SCHED_RR)
 #define has_rt_policy(p)	unlikely(is_rt_policy((p)->policy))
+#define idleprio_task(p)	unlikely((p)->policy == SCHED_IDLEPRIO)
+#define iso_task(p)		unlikely((p)->policy == SCHED_ISO)
+#define ISO_PERIOD		((5 * HZ * num_online_cpus()) + 1)
 
 /*
  * This is the time all tasks within the same priority round robin.
@@ -30,6 +20,14 @@
  * Tunable via /proc interface.
  */
 int rr_interval __read_mostly = 6;
+
+/*
+ * sched_iso_cpu - sysctl which determines the cpu percentage SCHED_ISO tasks
+ * are allowed to run five seconds as real time tasks. This is the total over
+ * all online cpus.
+ */
+int sched_iso_cpu __read_mostly = 70;
+
 int prio_ratios[PRIO_RANGE] __read_mostly;
 
 static inline unsigned long timeslice(void)
@@ -44,6 +42,8 @@ struct global_rq {
 	unsigned long long nr_switches;
 	struct list_head queue[PRIO_LIMIT];
 	DECLARE_BITMAP(prio_bitmap, PRIO_LIMIT + 1);
+	unsigned long iso_ticks;
+	unsigned short iso_refractory;
 };
 
 static struct global_rq grq;
@@ -380,11 +380,35 @@ static inline void reset_first_time_slice(struct task_struct *p)
 		p->first_time_slice = 0;
 }
 
+static int idleprio_suitable(struct task_struct *p)
+{
+	return (!freezing(p) && !signal_pending(p) &&
+		!(task_contributes_to_load(p)) && !(p->flags & (PF_EXITING)));
+}
+
+static int isoprio_suitable(void)
+{
+	return !grq.iso_refractory;
+}
+
 /*
  * Adding to the global runqueue. Enter with grq locked.
  */
 static inline void enqueue_task(struct task_struct *p)
 {
+	if (idleprio_task(p) && !rt_task(p)) {
+		if (idleprio_suitable(p))
+			p->prio = p->normal_prio;
+		else
+			p->prio = NORMAL_PRIO;
+	}
+
+	if (iso_task(p) && !rt_task(p)) {
+		if (isoprio_suitable())
+			p->prio = p->normal_prio;
+		else
+			p->prio = NORMAL_PRIO;
+	}
 	__set_bit(p->prio, grq.prio_bitmap);
 	list_add_tail(&p->run_list, grq.queue + p->prio);
 	sched_info_queued(p);
@@ -398,7 +422,6 @@ static inline void enqueue_task_head(struct task_struct *p)
 	sched_info_queued(p);
 }
 
-/* No need to do anything, it happens on return_task */
 static inline void requeue_task(struct task_struct *p)
 {
 	sched_info_queued(p);
@@ -445,6 +468,10 @@ static inline int normal_prio(struct task_struct *p)
 {
 	if (has_rt_policy(p))
 		return MAX_RT_PRIO - 1 - p->rt_priority;
+	if (idleprio_task(p))
+		return IDLE_PRIO;
+	if (iso_task(p))
+		return ISO_PRIO;
 	return NORMAL_PRIO;
 }
 
@@ -730,16 +757,21 @@ void kick_process(struct task_struct *p)
 #define rq_idle(rq)	((rq)->curr == (rq)->idle)
 #endif
 
+/*
+ * RT tasks preempt purely on priority. SCHED_NORMAL tasks preempt on the
+ * basis of earlier deadlines. SCHED_BATCH and SCHED_IDLEPRIO don't preempt,
+ * they cooperatively multitask.
+ */
 static inline int task_preempts_curr(struct task_struct *p, struct rq *rq)
 {
 	struct task_struct *curr = rq->curr;
 	int preempts = 0;
 
-	if (rt_task(p)) {
-		if (p->prio < curr->prio)
-			preempts = 1;
-	} else if (p->prio == curr->prio && p->deadline < rq->queued_deadline)
+	if (p->prio < curr->prio)
 		preempts = 1;
+	else if (p->policy == SCHED_NORMAL && (p->prio == curr->prio &&
+		 p->deadline < rq->queued_deadline))
+			preempts = 1;
 	return preempts;
 }
 
@@ -1575,11 +1607,63 @@ void account_idle_ticks(unsigned long ticks)
 {
 	account_idle_time(jiffies_to_cputime(ticks));
 }
-
 #endif
+
+/*
+ * Test if SCHED_ISO tasks have run longer than their alloted period as RT
+ * tasks and set the refractory flag if necessary. There is 10% hysteresis
+ * for unsetting the flag.
+ */
+static unsigned int test_ret_isorefractory(struct rq *rq)
+{
+	if (likely(!grq.iso_refractory)) {
+		if (grq.iso_ticks / ISO_PERIOD > sched_iso_cpu)
+			grq.iso_refractory = 1;
+	} else {
+		if (grq.iso_ticks / ISO_PERIOD < (sched_iso_cpu * 90 / 100))
+			grq.iso_refractory = 0;
+	}
+	return grq.iso_refractory;
+}
+
+/* No SCHED_ISO task was running so decrease rq->iso_ticks */
+static inline void no_iso_tick(void)
+{
+	grq.iso_ticks = grq.iso_ticks * (ISO_PERIOD - 1) / ISO_PERIOD;
+}
+
+static int task_running_iso(struct task_struct *p)
+{
+	return p->prio == ISO_PRIO;
+}
+
 /* This manages tasks that have run out of timeslice during a scheduler_tick */
 static void task_running_tick(struct rq *rq, struct task_struct *p)
 {
+	/*
+	 * If a SCHED_ISO task is running we increment the iso_ticks. In
+	 * order to prevent SCHED_ISO tasks from causing starvation in the
+	 * presence of true RT tasks we account those as iso_ticks as well.
+	 */
+	if ((rt_task(p) || (iso_task(p) && !grq.iso_refractory))) {
+		if (grq.iso_ticks <= (ISO_PERIOD * 100) - 100)
+			grq.iso_ticks += 100;
+	} else
+		no_iso_tick();
+
+	if (iso_task(p)) {
+		if (unlikely(test_ret_isorefractory(rq))) {
+			if (task_running_iso(p)) {
+				/*
+				 * SCHED_ISO task is running as RT and limit
+				 * has been hit. Force it to reschedule as
+				 * SCHED_NORMAL by zeroing its time_slice
+				 */
+				p->time_slice = 0;
+			}
+		}
+	}
+
 	/* SCHED_FIFO tasks never run out of timeslice. */
 	if (p->time_slice > 0 || p->policy == SCHED_FIFO)
 		return;
@@ -1607,6 +1691,8 @@ void scheduler_tick(void)
 	update_cpu_clock(p, rq, now, 1);
 	if (!rq_idle(rq))
 		task_running_tick(rq, p);
+	else
+		no_iso_tick();
 	grq_unlock();
 }
 
@@ -1660,22 +1746,29 @@ static inline unsigned long prio_deadline_diff(struct task_struct *p)
 	return (prio_ratio(p) * rr_interval * HZ / 1000 / 100) ? : 1;
 }
 
+static inline int longest_deadline(void)
+{
+	return (prio_ratios[39] * rr_interval * HZ / 1000 / 100);
+}
+
+/*
+ * SCHED_IDLEPRIO tasks still have a deadline set, but equal to nice +19 for
+ * when they're scheduled as SCHED_NORMAL tasks.
+ */
 static inline void time_slice_expired(struct task_struct *p)
 {
 	reset_first_time_slice(p);
 	p->time_slice = timeslice();
-	p->deadline = jiffies + prio_deadline_diff(p);
+	if (idleprio_task(p))
+		p->deadline = jiffies + longest_deadline();
+	else
+		p->deadline = jiffies + prio_deadline_diff(p);
 }
 
 static inline void check_deadline(struct task_struct *p)
 {
 	if (p->time_slice <= 0)
 		time_slice_expired(p);
-}
-
-static inline int longest_deadline(void)
-{
-	return (prio_ratios[39] * rr_interval * HZ / 1000 / 100) + 1;
 }
 
 /*
@@ -1707,21 +1800,19 @@ retry:
 				goto out_take;
 			}
 		}
-	}
-	if (unlikely(idx < NORMAL_PRIO)) {
 		/* More rt tasks, we couldn't take the lower prio ones */
 		++idx;
 		goto retry;
 	}
 
-	/* No rt tasks found, find earliest deadline normal task */
+	/* No rt tasks, find earliest deadline task */
 	edt = idle;
 	if (unlikely(idx >= PRIO_LIMIT)) {
 		/* All rt tasks but none suitable for this cpu */
 		goto out;
 	}
 
-	long_deadline = shortest_deadline = longest_deadline();
+	long_deadline = shortest_deadline = longest_deadline() + 1;
 	list_for_each_entry(p, queue, run_list) {
 		unsigned long deadline_diff;
 		/* Make sure cpu affinity is ok */
@@ -1740,8 +1831,14 @@ retry:
 			edt = p;
 		}
 	}
-	if (edt == idle)
+	if (edt == idle) {
+		if (idx < IDLE_PRIO) {
+			/* Haven't checked for SCHED_IDLEPRIO tasks yet */
+			idx++;
+			goto retry;
+		}
 		goto out;
+	}
 out_take:
 	take_task(rq, edt);
 out:
@@ -2498,19 +2595,18 @@ SYSCALL_DEFINE1(nice, int, increment)
  *
  * This is the priority value as seen by users in /proc.
  * RT tasks are offset by -100. Normal tasks are centered
- * around 0, value goes from 0 to +100.
+ * around 1, value goes from 0 to +40.
  */
 int task_prio(const struct task_struct *p)
 {
 	int delta, prio = p->prio - MAX_RT_PRIO;
 
-	if (prio < 0)
+	/* rt tasks and iso tasks */
+	if (prio <= 0)
 		goto out;
 
-	delta = (p->deadline - jiffies) * 100 / prio_ratios[39];
-	if (delta > 100)
-		delta = 100;
-	else if (delta < 0)
+	delta = (p->deadline - jiffies) * 200 / prio_ratios[39];
+	if (delta > 40 || delta < 0)
 		delta = 0;
 	prio += delta;
 out:
@@ -2585,18 +2681,36 @@ static bool check_same_owner(struct task_struct *p)
 static int __sched_setscheduler(struct task_struct *p, int policy,
 		       struct sched_param *param, bool user)
 {
+	struct sched_param zero_param = { .sched_priority = 0 };
 	int queued, retval, oldprio, oldpolicy = -1;
-	unsigned long flags;
+	unsigned long flags, rlim_rtprio = 0;
 	struct rq *rq;
 
 	/* may grab non-irq protected spin_locks */
 	BUG_ON(in_interrupt());
+
+	if (is_rt_policy(policy) && !capable(CAP_SYS_NICE)) {
+		unsigned long lflags;
+
+		if (!lock_task_sighand(p, &lflags))
+			return -ESRCH;
+		rlim_rtprio = p->signal->rlim[RLIMIT_RTPRIO].rlim_cur;
+		unlock_task_sighand(p, &lflags);
+		if (rlim_rtprio)
+			goto recheck;
+		/*
+		 * If the caller requested an RT policy without having the
+		 * necessary rights, we downgrade the policy to SCHED_ISO.
+		 * We also set the parameter to zero to pass the checks.
+		 */
+		policy = SCHED_ISO;
+		param = &zero_param;
+	}
 recheck:
 	/* double check policy once rq lock held */
 	if (policy < 0)
 		policy = oldpolicy = p->policy;
-	else if (policy != SCHED_FIFO && policy != SCHED_RR &&
-			policy != SCHED_NORMAL && policy != SCHED_BATCH)
+	else if (!SCHED_RANGE(policy))
 		return -EINVAL;
 	/*
 	 * Valid priorities for SCHED_FIFO and SCHED_RR are
@@ -2615,14 +2729,6 @@ recheck:
 	 */
 	if (user && !capable(CAP_SYS_NICE)) {
 		if (is_rt_policy(policy)) {
-			unsigned long rlim_rtprio;
-			unsigned long flags;
-
-			if (!lock_task_sighand(p, &flags))
-				return -ESRCH;
-			rlim_rtprio = p->signal->rlim[RLIMIT_RTPRIO].rlim_cur;
-			unlock_task_sighand(p, &flags);
-
 			/* can't set/change the rt policy */
 			if (policy != p->policy && !rlim_rtprio)
 				return -EPERM;
@@ -2631,6 +2737,31 @@ recheck:
 			if (param->sched_priority > p->rt_priority &&
 			    param->sched_priority > rlim_rtprio)
 				return -EPERM;
+		} else {
+			switch (p->policy) {
+				/*
+				 * Can only downgrade policies but not back to
+				 * SCHED_NORMAL
+				 */
+				case SCHED_ISO:
+					if (policy == SCHED_ISO)
+						goto out;
+					if (policy == SCHED_NORMAL)
+						return -EPERM;
+					break;
+				case SCHED_BATCH:
+					if (policy == SCHED_BATCH)
+						goto out;
+					if (policy != SCHED_IDLEPRIO)
+						return -EPERM;
+					break;
+				case SCHED_IDLEPRIO:
+					if (policy == SCHED_IDLEPRIO)
+						goto out;
+					return -EPERM;
+				default:
+					break;
+			}
 		}
 
 		/* can't change other user's priorities */
@@ -2679,7 +2810,7 @@ recheck:
 	spin_unlock_irqrestore(&p->pi_lock, flags);
 
 	rt_mutex_adjust_pi(p);
-
+out:
 	return 0;
 }
 
@@ -3151,6 +3282,8 @@ SYSCALL_DEFINE1(sched_get_priority_max, int, policy)
 		break;
 	case SCHED_NORMAL:
 	case SCHED_BATCH:
+	case SCHED_ISO:
+	case SCHED_IDLEPRIO:
 		ret = 0;
 		break;
 	}
@@ -3175,6 +3308,8 @@ SYSCALL_DEFINE1(sched_get_priority_min, int, policy)
 		break;
 	case SCHED_NORMAL:
 	case SCHED_BATCH:
+	case SCHED_ISO:
+	case SCHED_IDLEPRIO:
 		ret = 0;
 	}
 	return ret;
@@ -5343,7 +5478,7 @@ void __init sched_init(void)
 		atomic_set(&rq->nr_iowait, 0);
 		highest_cpu = i;
 	}
-	grq.nr_running = grq.nr_uninterruptible = 0;
+	grq.iso_ticks = grq.nr_running = grq.nr_uninterruptible = 0;
 	for (i = 0; i < PRIO_LIMIT; i++)
 		INIT_LIST_HEAD(grq.queue + i);
 	bitmap_zero(grq.prio_bitmap, PRIO_LIMIT);
@@ -5422,7 +5557,7 @@ void normalize_rt_tasks(void)
 	read_lock_irq(&tasklist_lock);
 
 	do_each_thread(g, p) {
-		if (!rt_task(p))
+		if (!rt_task(p) && !iso_task(p))
 			continue;
 
 		spin_lock_irqsave(&p->pi_lock, flags);

@@ -27,6 +27,7 @@ show up in /proc/sys/kernel:
 - domainname
 - hostname
 - hotplug
+- iso_cpu
 - java-appletviewer           [ binfmt_java, obsolete ]
 - java-interpreter            [ binfmt_java, obsolete ]
 - kstack_depth_to_print       [ X86 only ]
@@ -169,6 +170,16 @@ hotplug:
 
 Path for the hotplug policy agent.
 Default value is "/sbin/hotplug".
+
+==============================================================
+
+iso_cpu:
+
+This sets the percentage cpu that the unprivileged SCHED_ISO tasks can
+run effectively at realtime priority, averaged over a rolling five
+seconds over the -whole- system, meaning all cpus.
+
+Set to 70 (percent) by default.
 
 ==============================================================
 

@@ -36,8 +36,14 @@
 #define SCHED_FIFO		1
 #define SCHED_RR		2
 #define SCHED_BATCH		3
-/* SCHED_ISO: reserved but not implemented yet */
+#define SCHED_ISO		4
 #define SCHED_IDLE		5
+#define SCHED_IDLEPRIO		(SCHED_IDLE)
+
+#ifdef CONFIG_CPU_BFS
+# define SCHED_MAX		(SCHED_IDLEPRIO)
+# define SCHED_RANGE(policy)	((policy) <= SCHED_MAX)
+#endif
 
 #ifdef __KERNEL__
 
@@ -1537,7 +1543,9 @@ struct task_struct {
 #ifdef CONFIG_CPU_BFS
 # define PRIO_RANGE		(40)
 # define MAX_PRIO		(MAX_RT_PRIO + PRIO_RANGE)
-# define NORMAL_PRIO		MAX_RT_PRIO
+# define ISO_PRIO               (MAX_RT_PRIO)
+# define NORMAL_PRIO            (MAX_RT_PRIO + 1)
+# define IDLE_PRIO              (MAX_RT_PRIO + 2)
 # define PRIO_LIMIT		((NORMAL_PRIO) + 1)
 #else
 # define MAX_PRIO		(MAX_RT_PRIO + 40)
