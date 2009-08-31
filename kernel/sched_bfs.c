@@ -427,19 +427,6 @@ static inline void requeue_task(struct task_struct *p)
 	sched_info_queued(p);
 }
 
-/*
- * Adjust timestamp when we move rqs.
- */
-static void adjust_moved_rq(struct task_struct *p, struct rq *old_rq,
-					struct rq *new_rq)
-{
-#ifdef CONFIG_SMP
-	/* Compensate for drifting sched_clock */
-	p->timestamp = (p->timestamp - old_rq->most_recent_timestamp)
-				+ new_rq->most_recent_timestamp;
-#endif
-}
-
 static inline int prio_ratio(struct task_struct *p)
 {
 	return prio_ratios[USER_PRIO(p->static_prio)];
@@ -833,7 +820,7 @@ found_rq:
  * try_to_wake_up - wake up a thread
  * @p: the to-be-woken-up thread
  * @state: the mask of task states that can be woken
- * @sync: do a synchronous wakeup?
+ * sync is ignored on bfs
  *
  * Put it on the run-queue if it's not already there. The "current"
  * thread is always on the run-queue (except when the actual
@@ -843,10 +830,10 @@ found_rq:
  *
  * returns failure only if the task is already active.
  */
-static int try_to_wake_up(struct task_struct *p, unsigned int state, int sync)
+static int try_to_wake_up(struct task_struct *p, unsigned int state)
 {
-	int cpu, this_cpu, success = 0;
 	unsigned long flags;
+	int success = 0;
 	long old_state;
 	struct rq *rq;
 
@@ -858,20 +845,8 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state, int sync)
 	if (queued_or_running(p))
 		goto out_running;
 
-	cpu = task_cpu(p);
-	this_cpu = smp_processor_id();
-
-	/*
-	 * Sync wakeups (i.e. those types of wakeups where the waker
-	 * has indicated that it will leave the CPU in short order)
-	 * don't trigger a preemption, if the woken up task will run on
-	 * this cpu. (in this case the 'I will reschedule' promise of
-	 * the waker guarantees that the freshly woken up task is going
-	 * to be considered on this CPU.)
-	 */
 	activate_task(p);
-	if (!sync || cpu != this_cpu)
-		try_preempt(p, rq);
+	try_preempt(p, rq);
 	success = 1;
 
 out_running:
@@ -883,13 +858,13 @@ out_unlock:
 
 int wake_up_process(struct task_struct *p)
 {
-	return try_to_wake_up(p, TASK_ALL, 0);
+	return try_to_wake_up(p, TASK_ALL);
 }
 EXPORT_SYMBOL(wake_up_process);
 
 int wake_up_state(struct task_struct *p, unsigned int state)
 {
-	return try_to_wake_up(p, state, 0);
+	return try_to_wake_up(p, state);
 }
 
 /*
@@ -967,36 +942,25 @@ out:
  */
 void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 {
-	struct rq *rq;
+	struct task_struct *parent;
 	unsigned long flags;
-	int this_cpu, cpu;
+	struct rq *rq  = time_task_grq_lock(p, &flags);
 
-	rq = time_task_grq_lock(p, &flags);
-	this_cpu = smp_processor_id();
+	parent = p->parent;
 	BUG_ON(p->state != TASK_RUNNING);
-	cpu = task_cpu(p);
+	set_task_cpu(p, task_cpu(parent));
 
-	if (likely(cpu == this_cpu)) {
-		activate_task(p);
-		if (!(clone_flags & CLONE_VM)) {
-			/*
-			 * The VM isn't cloned, so we're in a good position to
-			 * do child-runs-first in anticipation of an exec. This
-			 * usually avoids a lot of COW overhead. Make the
-			 * parent's deadline slightly later so the child gets
-			 * selected.
-			 */
-			p->parent->deadline += 1;
-			set_need_resched();
-		}
-	} else {
-		/* Does this even happen?? */
-		struct rq *this_rq = cpu_rq(this_cpu);
-
-		adjust_moved_rq(p, this_rq, rq);
-		activate_task(p);
+	activate_task(p);
+	if (!(clone_flags & CLONE_VM) && rq->curr == parent) {
+		/*
+		 * The VM isn't cloned, so we're in a good position to
+		 * do child-runs-first in anticipation of an exec. This
+		 * usually avoids a lot of COW overhead.
+		 */
+		set_tsk_need_resched(parent);
+		rq->preempt_next = p;
+	} else
 		try_preempt(p, rq);
-	}
 	task_grq_unlock(&flags);
 }
 
@@ -2061,7 +2025,7 @@ asmlinkage void __sched preempt_schedule_irq(void)
 int default_wake_function(wait_queue_t *curr, unsigned mode, int sync,
 			  void *key)
 {
-	return try_to_wake_up(curr->private, mode, sync);
+	return try_to_wake_up(curr->private, mode);
 }
 EXPORT_SYMBOL(default_wake_function);
 
