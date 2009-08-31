@@ -7,13 +7,13 @@ choice
 	  If you do not know what you are doing, choose "Completely Fair Scheduler".
 
 config CPU_CFS
-	bool "Completely Fair Scheduler"
+	bool "Completely Fair Scheduler (CFS)"
 	help
 	  The "Completely Fair Scheduler" (CFS), developed by Ingo Molnar,
 	  is the CPU scheduler used in the default vanilla kernel.
 
 config CPU_BFS
-	bool "Brainfuck Scheduler"
+	bool "Brainfuck Scheduler (BFS)"
 	help
 	  The "Brainfuck Scheduler" (BFS) is a new CPU scheduler developed
 	  by Con Kolivas. It is designed for ultra low latency and excellent
