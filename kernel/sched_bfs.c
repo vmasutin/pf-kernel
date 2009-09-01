@@ -44,6 +44,9 @@ struct global_rq {
 	DECLARE_BITMAP(prio_bitmap, PRIO_LIMIT + 1);
 	unsigned long iso_ticks;
 	unsigned short iso_refractory;
+#ifdef CONFIG_SMP
+	cpumask_t cpu_idle_map;
+#endif
 };
 
 static struct global_rq grq;
@@ -657,7 +660,7 @@ unsigned long wait_task_inactive(struct task_struct *p, long match_state)
 		 * just go back and repeat.
 		 */
 		rq = task_grq_lock(p, &flags);
-		//trace_sched_wait_task(rq, p); /* Wtf is this for? */
+		trace_sched_wait_task(rq, p);
 		running = task_running(p);
 		on_rq = task_queued(p);
 		ncsw = 0;
@@ -955,7 +958,10 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 		/*
 		 * The VM isn't cloned, so we're in a good position to
 		 * do child-runs-first in anticipation of an exec. This
-		 * usually avoids a lot of COW overhead.
+		 * usually avoids a lot of COW overhead. The parent is the
+		 * one time that a task that is descheduled on SMP does not
+		 * immediately get to look for a cpu here, so do it in
+		 * schedule().
 		 */
 		set_tsk_need_resched(parent);
 		rq->preempt_next = p;
@@ -1660,26 +1666,43 @@ void scheduler_tick(void)
 	grq_unlock();
 }
 
-#if defined(CONFIG_PREEMPT) && defined(CONFIG_DEBUG_PREEMPT)
-
-void add_preempt_count(int val)
+notrace unsigned long get_parent_ip(unsigned long addr)
 {
+	if (in_lock_functions(addr)) {
+		addr = CALLER_ADDR2;
+		if (in_lock_functions(addr))
+			addr = CALLER_ADDR3;
+	}
+	return addr;
+}
+
+#if defined(CONFIG_PREEMPT) && (defined(CONFIG_DEBUG_PREEMPT) || \
+				defined(CONFIG_PREEMPT_TRACER))
+void __kprobes add_preempt_count(int val)
+{
+#ifdef CONFIG_DEBUG_PREEMPT
 	/*
 	 * Underflow?
 	 */
 	if (DEBUG_LOCKS_WARN_ON((preempt_count() < 0)))
 		return;
+#endif
 	preempt_count() += val;
+#ifdef CONFIG_DEBUG_PREEMPT
 	/*
 	 * Spinlock count overflowing soon?
 	 */
 	DEBUG_LOCKS_WARN_ON((preempt_count() & PREEMPT_MASK) >=
 				PREEMPT_MASK - 10);
+#endif
+	if (preempt_count() == val)
+		trace_preempt_off(CALLER_ADDR0, get_parent_ip(CALLER_ADDR1));
 }
 EXPORT_SYMBOL(add_preempt_count);
 
-void sub_preempt_count(int val)
+void __kprobes sub_preempt_count(int val)
 {
+#ifdef CONFIG_DEBUG_PREEMPT
 	/*
 	 * Underflow?
 	 */
@@ -1691,11 +1714,13 @@ void sub_preempt_count(int val)
 	if (DEBUG_LOCKS_WARN_ON((val < PREEMPT_MASK) &&
 			!(preempt_count() & PREEMPT_MASK)))
 		return;
+#endif
 
+	if (preempt_count() == val)
+		trace_preempt_on(CALLER_ADDR0, get_parent_ip(CALLER_ADDR1));
 	preempt_count() -= val;
 }
 EXPORT_SYMBOL(sub_preempt_count);
-
 #endif
 
 /*
@@ -1809,6 +1834,50 @@ out:
 	return edt;
 }
 
+#ifdef CONFIG_SMP
+static inline void set_cpuidle_map(unsigned long cpu)
+{
+	cpu_set(cpu, grq.cpu_idle_map);
+}
+
+static inline void clear_cpuidle_map(unsigned long cpu)
+{
+	cpu_clear(cpu, grq.cpu_idle_map);
+}
+
+static inline int idle_cpu_available(struct task_struct *p)
+{
+	unsigned long cpu;
+	cpumask_t tmp;
+
+	cpus_and(tmp, p->cpus_allowed, grq.cpu_idle_map);
+	for_each_cpu_mask(cpu, tmp) {
+		struct rq *rq;
+
+		rq = cpu_rq(cpu);
+		if (rq_idle(rq)) {
+			resched_task(rq->idle);
+			rq->preempt_next = p;
+			return 1;
+		}
+	}
+	return 0;
+}
+#else /* CONFIG_SMP */
+static inline void set_cpuidle_map(unsigned long cpu)
+{
+}
+
+static inline void clear_cpuidle_map(unsigned long cpu)
+{
+}
+
+static inline int idle_cpu_available(struct task_struct *p)
+{
+	return 0;
+}
+#endif /* !CONFIG_SMP */
+
 /*
  * Print scheduling while atomic bug:
  */
@@ -1910,6 +1979,25 @@ need_resched_nonpreemptible:
 	} else {
 		next = idle;
 		schedstat_inc(rq, sched_goidle);
+	}
+
+	/*
+	 * If we find an idle cpu that we can wake next onto, we wake that one
+	 * up and move next to that cpu. This allows prev to stay on this cpu
+	 * for cache benefits. This is also where the parent from
+	 * wake_up_new_task doesn't miss an opportunity to schedule its child
+	 * onto another cpu. Optimised out on !SMP.
+	 */
+	if (next == rq->idle)
+		set_cpuidle_map(cpu);
+	else {
+		clear_cpuidle_map(cpu);
+		if (prev != next && prev != rq->idle && !deactivate &&
+			idle_cpu_available(next)) {
+				return_task(next, 0);
+				next = prev;
+				take_task(rq, next);
+			}
 	}
 
 	rq->preempt_next = NULL;
@@ -3400,6 +3488,7 @@ void __cpuinit init_idle(struct task_struct *idle, int cpu)
 	set_task_cpu(idle, cpu);
 	rq->curr = rq->idle = idle;
 	idle->oncpu = 1;
+	set_cpuidle_map(cpu);
 #ifdef CONFIG_HOTPLUG_CPU
 	idle->unplugged_mask = CPU_MASK_NONE;
 #endif
@@ -5422,6 +5511,7 @@ void __init sched_init(void)
 
 #ifdef CONFIG_SMP
 	init_defrootdomain();
+	cpus_clear(grq.cpu_idle_map);
 #endif
 	spin_lock_init(&grq.lock);
 	for_each_possible_cpu(i) {
