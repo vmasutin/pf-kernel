@@ -1993,6 +1993,7 @@ need_resched_nonpreemptible:
 	else {
 		clear_cpuidle_map(cpu);
 		if (prev != next && prev != rq->idle && !deactivate &&
+			cpu_isset(cpu, prev->cpus_allowed) &&
 			idle_cpu_available(next)) {
 				return_task(next, 0);
 				next = prev;
@@ -2712,6 +2713,12 @@ static void __setscheduler(struct task_struct *p, int policy, int prio)
 	p->normal_prio = normal_prio(p);
 	/* we are holding p->pi_lock already */
 	p->prio = rt_mutex_getprio(p);
+	/*
+	 * Reschedule if running. schedule() will know if it can continue
+	 * running or not.
+	 */
+	if (task_running(p))
+		resched_task(p);
 }
 
 /*
@@ -2847,13 +2854,6 @@ recheck:
 		dequeue_task(p);
 	oldprio = p->prio;
 	__setscheduler(p, policy, param->sched_priority);
-	/*
-	 * Reschedule if we are currently running on this runqueue and
-	 * our priority decreased, or if we are not currently running on
-	 * this runqueue and our priority is higher than the current's
-	 */
-	if (task_running(p) && p->prio > oldprio)
-		resched_task(p);
 	if (queued) {
 		enqueue_task(p);
 		try_preempt(p, rq);
@@ -3055,7 +3055,7 @@ long sched_setaffinity(pid_t pid, const struct cpumask *in_mask)
 
 	cpuset_cpus_allowed(p, cpus_allowed);
 	cpumask_and(new_mask, in_mask, cpus_allowed);
- again:
+again:
 	retval = set_cpus_allowed_ptr(p, new_mask);
 
 	if (!retval) {
@@ -3649,6 +3649,7 @@ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 	unsigned long flags;
 	struct rq *rq;
 	int ret = 0;
+	int running = 0;
 
 	rq = task_grq_lock(p, &flags);
 	if (!cpumask_intersects(new_mask, cpu_online_mask)) {
@@ -3669,13 +3670,17 @@ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 	if (cpumask_test_cpu(task_cpu(p), new_mask))
 		goto out;
 
-	/* Can't run on this cpu, just resched it if it's running */
+	/* Reschedule the task, schedule() will know if it can keep running */
 	if (task_running(p))
-		set_tsk_need_resched(p);
+		running = 1;
+	else
+		set_task_cpu(p, cpumask_any_and(cpu_online_mask, new_mask));
 
 out:
 	task_grq_unlock(&flags);
 
+	if (running)
+		schedule();
 	return ret;
 }
 EXPORT_SYMBOL_GPL(set_cpus_allowed_ptr);
