@@ -72,7 +72,6 @@
 #include <linux/debugfs.h>
 #include <linux/ctype.h>
 #include <linux/ftrace.h>
-#include <trace/events/sched.h>
 
 #include <asm/tlb.h>
 #include <asm/irq_regs.h>
@@ -80,6 +79,7 @@
 #include "sched_cpupri.h"
 
 #define CREATE_TRACE_POINTS
+#include <trace/events/sched.h>
 
 /*
  * Convert user-nice values [ -20 ... 0 ... 19 ]
