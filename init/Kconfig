@@ -506,6 +506,8 @@ config CGROUP_SCHED
 
 endchoice
 
+endif # CPU_CFS
+
 menuconfig CGROUPS
 	boolean "Control Group support"
 	help
@@ -571,12 +573,16 @@ config PROC_PID_CPUSET
 	depends on CPUSETS
 	default y
 
+if CPU_CFS
+
 config CGROUP_CPUACCT
 	bool "Simple CPU accounting cgroup subsystem"
 	depends on CGROUPS
 	help
 	  Provides a simple Resource Controller for monitoring the
 	  total CPU consumed by the tasks in a cgroup.
+
+endif
 
 config RESOURCE_COUNTERS
 	bool "Resource counters"
@@ -627,8 +633,6 @@ config CGROUP_MEM_RES_CTLR_SWAP
 	  size is 4096bytes, 512k per 1Gbytes of swap.
 
 endif # CGROUPS
-
-endif # CPU_CFS
 
 config MM_OWNER
 	bool

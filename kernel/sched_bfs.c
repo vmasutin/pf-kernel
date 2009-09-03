@@ -522,6 +522,20 @@ static inline void deactivate_task(struct task_struct *p)
 	grq.nr_running--;
 }
 
+#ifdef CONFIG_SMP
+void set_task_cpu(struct task_struct *p, unsigned int cpu)
+{
+	trace_sched_migrate_task(p, task_cpu(p), cpu);
+	/*
+	 * After ->cpu is set up to a new value, task_grq_lock(p, ...) can be
+	 * successfuly executed on another CPU. We must ensure that updates of
+	 * per-task data have been completed by this moment.
+	 */
+	smp_wmb();
+	task_thread_info(p)->cpu = cpu;
+}
+#endif
+
 /*
  * Move a task off the global queue and take it to a cpu for it will
  * become the running task.
@@ -853,6 +867,7 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state)
 	success = 1;
 
 out_running:
+	trace_sched_wakeup(rq, p, success);
 	p->state = TASK_RUNNING;
 out_unlock:
 	task_grq_unlock(&flags);
@@ -954,6 +969,7 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 	set_task_cpu(p, task_cpu(parent));
 
 	activate_task(p);
+	trace_sched_wakeup_new(rq, p, 1);
 	if (!(clone_flags & CLONE_VM) && rq->curr == parent) {
 		/*
 		 * The VM isn't cloned, so we're in a good position to
@@ -1154,6 +1170,7 @@ context_switch(struct rq *rq, struct task_struct *prev,
 	struct mm_struct *mm, *oldmm;
 
 	prepare_task_switch(rq, prev, next);
+	trace_sched_switch(rq, prev, next);
 	mm = next->mm;
 	oldmm = prev->active_mm;
 	/*
@@ -3500,6 +3517,7 @@ void __cpuinit init_idle(struct task_struct *idle, int cpu)
 #else
 	task_thread_info(idle)->preempt_count = 0;
 #endif
+	ftrace_graph_init_task(idle);
 }
 
 /*

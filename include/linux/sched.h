@@ -2400,14 +2400,7 @@ static inline unsigned int task_cpu(const struct task_struct *p)
 	return task_thread_info(p)->cpu;
 }
 
-#ifdef CONFIG_CPU_BFS
-static inline void set_task_cpu(struct task_struct *p, unsigned int cpu)
-{
-	task_thread_info(p)->cpu = cpu;
-}
-#else
 extern void set_task_cpu(struct task_struct *p, unsigned int cpu);
-#endif
 
 #else
 
