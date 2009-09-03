@@ -525,7 +525,7 @@ static inline void deactivate_task(struct task_struct *p)
 #ifdef CONFIG_SMP
 void set_task_cpu(struct task_struct *p, unsigned int cpu)
 {
-	trace_sched_migrate_task(p, task_cpu(p), cpu);
+	trace_sched_migrate_task(p, cpu);
 	/*
 	 * After ->cpu is set up to a new value, task_grq_lock(p, ...) can be
 	 * successfuly executed on another CPU. We must ensure that updates of
