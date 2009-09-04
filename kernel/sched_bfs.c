@@ -1762,7 +1762,7 @@ static inline unsigned long prio_deadline_diff(struct task_struct *p)
 	return (prio_ratio(p) * rr_interval * HZ / 1000 / 100) ? : 1;
 }
 
-static inline int longest_deadline(void)
+static inline long longest_deadline(void)
 {
 	return (prio_ratios[39] * rr_interval * HZ / 1000 / 100);
 }
@@ -1794,7 +1794,6 @@ static inline void check_deadline(struct task_struct *p)
 static inline struct
 task_struct *earliest_deadline_task(struct rq *rq, struct task_struct *idle)
 {
-	unsigned long long_deadline, shortest_deadline;
 	struct task_struct *edt, *p;
 	unsigned int cpu = rq->cpu;
 	struct list_head *queue;
@@ -1830,9 +1829,12 @@ retry:
 		goto out;
 	}
 
-	long_deadline = shortest_deadline = longest_deadline() + 1;
 	list_for_each_entry(p, queue, run_list) {
-		unsigned long deadline_diff;
+		/* Deadline can be in the past, use signed longs */
+		long long_deadline = longest_deadline() + 1;
+		long shortest_deadline = long_deadline;
+		long deadline_diff;
+
 		/* Make sure cpu affinity is ok */
 		if (!cpu_isset(cpu, p->cpus_allowed))
 			continue;
