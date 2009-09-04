@@ -951,6 +951,18 @@ out:
 	put_cpu();
 }
 
+#ifdef CONFIG_SMP
+static int no_idle_cpus(void)
+{
+	return (cpus_empty(grq.cpu_idle_map));
+}
+#else
+static int no_idle_cpus(void)
+{
+	return 1;
+}
+#endif
+
 /*
  * wake_up_new_task - wake up a newly created task for the first time.
  *
@@ -970,17 +982,15 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 
 	activate_task(p);
 	trace_sched_wakeup_new(rq, p, 1);
-	if (!(clone_flags & CLONE_VM) && rq->curr == parent) {
+	if (!(clone_flags & CLONE_VM) && rq->curr == parent &&
+		no_idle_cpus()) {
 		/*
 		 * The VM isn't cloned, so we're in a good position to
 		 * do child-runs-first in anticipation of an exec. This
-		 * usually avoids a lot of COW overhead. The parent is the
-		 * one time that a task that is descheduled on SMP does not
-		 * immediately get to look for a cpu here, so do it in
-		 * schedule().
+		 * usually avoids a lot of COW overhead.
 		 */
-		set_tsk_need_resched(parent);
-		rq->preempt_next = p;
+			set_tsk_need_resched(parent);
+			rq->preempt_next = p;
 	} else
 		try_preempt(p, rq);
 	task_grq_unlock(&flags);
@@ -1786,13 +1796,15 @@ task_struct *earliest_deadline_task(struct rq *rq, struct task_struct *idle)
 {
 	unsigned long long_deadline, shortest_deadline;
 	struct task_struct *edt, *p;
+	unsigned int cpu = rq->cpu;
 	struct list_head *queue;
 	int idx = 0;
 
 	if (rq->preempt_next) {
-		if (likely(task_queued(rq->preempt_next))) {
-			edt = rq->preempt_next;
-			goto out_take;
+		if (likely(task_queued(rq->preempt_next) &&
+			cpu_isset(cpu, rq->preempt_next->cpus_allowed))) {
+				edt = rq->preempt_next;
+				goto out_take;
 		}
 	}
 retry:
@@ -1801,7 +1813,7 @@ retry:
 	if (idx < MAX_RT_PRIO) {
 		/* We found rt tasks */
 		list_for_each_entry(p, queue, run_list) {
-			if (cpu_isset(rq->cpu, p->cpus_allowed)) {
+			if (cpu_isset(cpu, p->cpus_allowed)) {
 				edt = p;
 				goto out_take;
 			}
@@ -1822,7 +1834,7 @@ retry:
 	list_for_each_entry(p, queue, run_list) {
 		unsigned long deadline_diff;
 		/* Make sure cpu affinity is ok */
-		if (!cpu_isset(rq->cpu, p->cpus_allowed))
+		if (!cpu_isset(cpu, p->cpus_allowed))
 			continue;
 
 		deadline_diff = p->deadline - jiffies;
@@ -1862,24 +1874,6 @@ static inline void clear_cpuidle_map(unsigned long cpu)
 	cpu_clear(cpu, grq.cpu_idle_map);
 }
 
-static inline int idle_cpu_available(struct task_struct *p)
-{
-	unsigned long cpu;
-	cpumask_t tmp;
-
-	cpus_and(tmp, p->cpus_allowed, grq.cpu_idle_map);
-	for_each_cpu_mask(cpu, tmp) {
-		struct rq *rq;
-
-		rq = cpu_rq(cpu);
-		if (rq_idle(rq)) {
-			resched_task(rq->idle);
-			rq->preempt_next = p;
-			return 1;
-		}
-	}
-	return 0;
-}
 #else /* CONFIG_SMP */
 static inline void set_cpuidle_map(unsigned long cpu)
 {
@@ -1887,11 +1881,6 @@ static inline void set_cpuidle_map(unsigned long cpu)
 
 static inline void clear_cpuidle_map(unsigned long cpu)
 {
-}
-
-static inline int idle_cpu_available(struct task_struct *p)
-{
-	return 0;
 }
 #endif /* !CONFIG_SMP */
 
@@ -1998,25 +1987,10 @@ need_resched_nonpreemptible:
 		schedstat_inc(rq, sched_goidle);
 	}
 
-	/*
-	 * If we find an idle cpu that we can wake next onto, we wake that one
-	 * up and move next to that cpu. This allows prev to stay on this cpu
-	 * for cache benefits. This is also where the parent from
-	 * wake_up_new_task doesn't miss an opportunity to schedule its child
-	 * onto another cpu. Optimised out on !SMP.
-	 */
 	if (next == rq->idle)
 		set_cpuidle_map(cpu);
-	else {
+	else
 		clear_cpuidle_map(cpu);
-		if (prev != next && prev != rq->idle && !deactivate &&
-			cpu_isset(cpu, prev->cpus_allowed) &&
-			idle_cpu_available(next)) {
-				return_task(next, 0);
-				next = prev;
-				take_task(rq, next);
-			}
-	}
 
 	rq->preempt_next = NULL;
 
@@ -2525,6 +2499,8 @@ void rt_mutex_setprio(struct task_struct *p, int prio)
 	if (queued)
 		dequeue_task(p);
 	p->prio = prio;
+	if (task_running(p))
+		resched_task(p);
 	if (queued) {
 		enqueue_task(p);
 		try_preempt(p, rq);
@@ -2588,16 +2564,14 @@ void set_user_nice(struct task_struct *p, long nice)
 	p->static_prio = new_static;
 	p->prio = effective_prio(p);
 
-	if (queued)
+	if (queued) {
 		enqueue_task(p);
-	/*
-	 * If the task increased its priority or is running and
-	 * lowered its priority, then reschedule its CPU:
-	 */
-	if (task_running(p) && delta > 0)
-		resched_task(p);
-	else if (queued && !task_running(p) && delta < 0)
 		try_preempt(p, rq);
+	}
+
+	/* Just resched the task, schedule() will know what to do. */
+	if (task_running(p))
+		resched_task(p);
 out_unlock:
 	task_grq_unlock(&flags);
 }
@@ -2871,6 +2845,8 @@ recheck:
 		dequeue_task(p);
 	oldprio = p->prio;
 	__setscheduler(p, policy, param->sched_priority);
+	if (task_running(p))
+		resched_task(p);
 	if (queued) {
 		enqueue_task(p);
 		try_preempt(p, rq);
@@ -3727,7 +3703,7 @@ void sched_idle_next(void)
 	__setscheduler(idle, SCHED_FIFO, MAX_RT_PRIO - 1);
 
 	update_rq_clock(rq);
-	activate_task(idle);
+	activate_idle_task(idle);
 	rq->preempt_next = idle;
 	resched_task(rq->curr);
 
@@ -3936,9 +3912,11 @@ static void set_rq_offline(struct rq *rq)
 
 #ifdef CONFIG_HOTPLUG_CPU
 /*
- * This cpu is going down, so remove it from the cpus_allowed. No need to do
- * anything special since they'll just move on next reschedule if they're
- * running, and they're not on a cpu if they're in the global queue.
+ * This cpu is going down, so walk over the tasklist and find tasks that can
+ * only run on this cpu and remove their affinity. Store their value in
+ * unplugged_mask so it can be restored once their correct cpu is online. No
+ * need to do anything special since they'll just move on next reschedule if
+ * they're running.
  */
 static void remove_cpu(unsigned long cpu)
 {
@@ -3947,16 +3925,14 @@ static void remove_cpu(unsigned long cpu)
 	read_lock(&tasklist_lock);
 
 	do_each_thread(t, p) {
-		/*
-		 * Store the "real" affinity in unplugged_mask. Copy the
-		 * allowed cpus if it has not yet been set.
-		 */
-		if (cpus_empty(p->unplugged_mask))
+		cpumask_t cpus_remaining;
+
+		cpus_and(cpus_remaining, p->cpus_allowed, cpu_online_map);
+		cpu_clear(cpu, cpus_remaining);
+		if (cpus_empty(cpus_remaining)) {
 			p->unplugged_mask = p->cpus_allowed;
-		cpu_clear(cpu, p->cpus_allowed);
-		if (cpus_empty(p->cpus_allowed))
-			cpus_andnot(p->cpus_allowed, cpu_online_map,
-					cpumask_of_cpu(cpu));
+			p->cpus_allowed = cpu_possible_map;
+		}
 	} while_each_thread(t, p);
 
 	read_unlock(&tasklist_lock);
@@ -5644,9 +5620,11 @@ void normalize_rt_tasks(void)
 		if (queued)
 			dequeue_task(p);
 		__setscheduler(p, SCHED_NORMAL, 0);
+		if (task_running(p))
+			resched_task(p);
 		if (queued) {
 			enqueue_task(p);
-			resched_task(rq->curr);
+			try_preempt(p, rq);
 		}
 
 		__task_grq_unlock();
