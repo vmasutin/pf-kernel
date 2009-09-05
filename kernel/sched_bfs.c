@@ -1319,7 +1319,9 @@ EXPORT_PER_CPU_SYMBOL(kstat);
  * Bank in p->sched_time the ns elapsed since the last tick or switch.
  * CPU scheduler quota accounting is also performed here in microseconds.
  * The value returned from sched_clock() occasionally gives bogus values so
- * some sanity checking is required.
+ * some sanity checking is required. Time is supposed to be banked all the
+ * time so default to half a tick to make up for when sched_clock reverts
+ * to just returning jiffies, and for hardware that can't do tsc.
  */
 static void
 update_cpu_clock(struct task_struct *p, struct rq *rq, unsigned long long now,
@@ -1334,8 +1336,8 @@ update_cpu_clock(struct task_struct *p, struct rq *rq, unsigned long long now,
 		 */
 		if (time_diff > JIFFIES_TO_NS(2))
 			time_diff = JIFFIES_TO_NS(2);
-		else if (time_diff < 0)
-			time_diff = 0;
+		else if (time_diff <= 0)
+			time_diff = JIFFIES_TO_NS(1) / 2;
 	} else {
 		/*
 		 * Called from context_switch there should be less than one
@@ -1343,8 +1345,8 @@ update_cpu_clock(struct task_struct *p, struct rq *rq, unsigned long long now,
 		 */
 		if (time_diff > JIFFIES_TO_NS(1))
 			time_diff = JIFFIES_TO_NS(1);
-		else if(time_diff < 0)
-			time_diff = 0;
+		else if (time_diff <= 0)
+			time_diff = JIFFIES_TO_NS(1) / 2;
 	}
 	/* time_slice accounting is done in usecs to avoid overflow on 32bit */
 	if (p != rq->idle && p->policy != SCHED_FIFO)
@@ -1678,14 +1680,14 @@ static void task_running_tick(struct rq *rq, struct task_struct *p)
  */
 void scheduler_tick(void)
 {
-	unsigned long long now = sched_clock();
 	int cpu = smp_processor_id();
 	struct rq *rq = cpu_rq(cpu);
 	struct task_struct *p;
 
+	sched_clock_tick();
 	time_lock_rq(rq);
 	p = rq->curr;
-	update_cpu_clock(p, rq, now, 1);
+	update_cpu_clock(p, rq, sched_clock(), 1);
 	if (!rq_idle(rq))
 		task_running_tick(rq, p);
 	else
@@ -1768,17 +1770,18 @@ static inline int longest_deadline(void)
 }
 
 /*
- * SCHED_IDLEPRIO tasks still have a deadline set, but equal to nice +19 for
- * when they're scheduled as SCHED_NORMAL tasks.
+ * SCHED_IDLEPRIO tasks still have a deadline set, but offset by to nice +19.
+ * This allows nice levels to work between IDLEPRIO tasks and gives a
+ * deadline longer than nice +19 for when they're scheduled as SCHED_NORMAL
+ * tasks.
  */
 static inline void time_slice_expired(struct task_struct *p)
 {
 	reset_first_time_slice(p);
 	p->time_slice = timeslice();
+	p->deadline = jiffies + prio_deadline_diff(p);
 	if (idleprio_task(p))
-		p->deadline = jiffies + longest_deadline();
-	else
-		p->deadline = jiffies + prio_deadline_diff(p);
+		p->deadline += longest_deadline();
 }
 
 static inline void check_deadline(struct task_struct *p)
@@ -1830,7 +1833,7 @@ retry:
 		goto out;
 	}
 
-	long_deadline = shortest_deadline = longest_deadline() + 1;
+	long_deadline = shortest_deadline = longest_deadline() * 2 + 1;
 	list_for_each_entry(p, queue, run_list) {
 		unsigned long deadline_diff;
 		/* Make sure cpu affinity is ok */
@@ -1839,8 +1842,8 @@ retry:
 
 		deadline_diff = p->deadline - jiffies;
 
-		/* Check for jiffy wrap! */
-		if (unlikely(deadline_diff > long_deadline))
+		/* Normalise all old deadlines and cope with jiffy wrap. */
+		if (deadline_diff > long_deadline)
 			deadline_diff = 0;
 
 		/* Select the earliest deadline task now */
@@ -2639,7 +2642,7 @@ SYSCALL_DEFINE1(nice, int, increment)
  *
  * This is the priority value as seen by users in /proc.
  * RT tasks are offset by -100. Normal tasks are centered
- * around 1, value goes from 0 to +40.
+ * around 1, value goes from 0 to +80.
  */
 int task_prio(const struct task_struct *p)
 {
@@ -2650,7 +2653,7 @@ int task_prio(const struct task_struct *p)
 		goto out;
 
 	delta = (p->deadline - jiffies) * 200 / prio_ratios[39];
-	if (delta > 40 || delta < 0)
+	if (delta > 80 || delta < 0)
 		delta = 0;
 	prio += delta;
 out:
