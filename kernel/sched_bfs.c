@@ -62,8 +62,6 @@ struct rq {
 #endif
 #endif
 
-	/* Cached timestamp set by update_cpu_clock() */
-	unsigned long long most_recent_timestamp;
 	struct task_struct *preempt_next;
 	struct task_struct *curr, *idle;
 	struct mm_struct *prev_mm;
@@ -183,14 +181,9 @@ static inline int cpu_of(struct rq *rq)
 # define finish_arch_switch(prev)	do { } while (0)
 #endif
 
-/*
- * This will cost if schedstats is enabled since it's done under lock.
- */
 static inline void update_rq_clock(struct rq *rq)
 {
-#if defined(CONFIG_SCHEDSTATS) || defined(CONFIG_TASK_DELAY_ACCT)
 	rq->clock = sched_clock_cpu(cpu_of(rq));
-#endif
 }
 
 static inline int task_running(struct task_struct *p)
@@ -485,11 +478,12 @@ static int effective_prio(struct task_struct *p)
 }
 
 /*
- * activate_task - move a task to the runqueue. Enter with grq locked.
+ * activate_task - move a task to the runqueue. Enter with grq locked. The rq
+ * doesn't really matter but gives us the local clock.
  */
-static void activate_task(struct task_struct *p)
+static void activate_task(struct task_struct *p, struct rq *rq)
 {
-	unsigned long long now = sched_clock();
+	u64 now = rq->clock;
 
 	/*
 	 * Sleep time is in units of nanosecs, so shift by 20 to get a
@@ -862,7 +856,7 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state)
 	if (queued_or_running(p))
 		goto out_running;
 
-	activate_task(p);
+	activate_task(p, rq);
 	try_preempt(p, rq);
 	success = 1;
 
@@ -945,7 +939,6 @@ void sched_fork(struct task_struct *p, int clone_flags)
 	} else
 		p->time_slice = 0;
 
-	p->timestamp = sched_clock();
 	local_irq_enable();
 out:
 	put_cpu();
@@ -980,7 +973,7 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 	BUG_ON(p->state != TASK_RUNNING);
 	set_task_cpu(p, task_cpu(parent));
 
-	activate_task(p);
+	activate_task(p, rq);
 	trace_sched_wakeup_new(rq, p, 1);
 	if (!(clone_flags & CLONE_VM) && rq->curr == parent &&
 		no_idle_cpus()) {
@@ -1237,11 +1230,7 @@ unsigned long nr_running(void)
 
 unsigned long nr_uninterruptible(void)
 {
-	unsigned long nu = grq.nr_uninterruptible;
-
-	if (unlikely (nu < 0))
-		nu = 0;
-	return nu;
+	return grq.nr_uninterruptible;
 }
 
 unsigned long long nr_context_switches(void)
@@ -1324,10 +1313,9 @@ EXPORT_PER_CPU_SYMBOL(kstat);
  * to just returning jiffies, and for hardware that can't do tsc.
  */
 static void
-update_cpu_clock(struct task_struct *p, struct rq *rq, unsigned long long now,
-		 int tick)
+update_cpu_clock(struct task_struct *p, struct rq *rq, int tick)
 {
-	long time_diff = now - p->last_ran;
+	long time_diff = rq->clock - p->last_ran;
 
 	if (tick) {
 		/*
@@ -1352,7 +1340,7 @@ update_cpu_clock(struct task_struct *p, struct rq *rq, unsigned long long now,
 	if (p != rq->idle && p->policy != SCHED_FIFO)
 		p->time_slice -= time_diff / 1000;
 	p->sched_time += time_diff;
-	p->last_ran = rq->most_recent_timestamp = now;
+	p->last_ran = rq->clock;
 }
 
 /*
@@ -1367,7 +1355,7 @@ static u64 do_task_delta_exec(struct task_struct *p, struct rq *rq)
 
 	if (p == rq->curr) {
 		update_rq_clock(rq);
-		ns = sched_clock() - p->last_ran;
+		ns = rq->clock - p->last_ran;
 		if ((s64)ns < 0)
 			ns = 0;
 	}
@@ -1402,22 +1390,6 @@ unsigned long long task_sched_runtime(struct task_struct *p)
 	rq = task_grq_lock(p, &flags);
 	ns = p->sched_time + do_task_delta_exec(p, rq);
 	task_grq_unlock(&flags);
-
-	return ns;
-}
-
-/*
- * Return current->sched_time plus any more ns on the sched_clock
- * that have not yet been banked.
- */
-unsigned long long current_sched_time(const struct task_struct *p)
-{
-	unsigned long long ns;
-	unsigned long flags;
-
-	local_irq_save(flags);
-	ns = p->sched_time + sched_clock() - p->last_ran;
-	local_irq_restore(flags);
 
 	return ns;
 }
@@ -1687,7 +1659,7 @@ void scheduler_tick(void)
 	sched_clock_tick();
 	time_lock_rq(rq);
 	p = rq->curr;
-	update_cpu_clock(p, rq, sched_clock(), 1);
+	update_cpu_clock(p, rq, 1);
 	if (!rq_idle(rq))
 		task_running_tick(rq, p);
 	else
@@ -1939,9 +1911,9 @@ asmlinkage void __sched __schedule(void)
 {
 	struct task_struct *prev, *next, *idle;
 	int deactivate = 0, cpu;
-	unsigned long long now;
 	long *switch_count;
 	struct rq *rq;
+	u64 now;
 
 	cpu = smp_processor_id();
 	rq = this_rq();
@@ -1963,10 +1935,10 @@ need_resched_nonpreemptible:
 		dump_stack();
 	}
 
-	now = sched_clock();
-
 	grq_lock_irq();
 	update_rq_clock(rq);
+	now = rq->clock;
+
 	clear_tsk_need_resched(prev);
 
 	if (prev->state && !(preempt_count() & PREEMPT_ACTIVE)) {
@@ -2000,7 +1972,7 @@ need_resched_nonpreemptible:
 	prefetch(next);
 	prefetch_stack(next);
 
-	update_cpu_clock(prev, rq, now, 0);
+	update_cpu_clock(prev, rq, 0);
 	prev->timestamp = prev->last_ran = now;
 	rq->queued_prio = next->prio;
 
@@ -2652,10 +2624,10 @@ int task_prio(const struct task_struct *p)
 	if (prio <= 0)
 		goto out;
 
-	delta = (p->deadline - jiffies) * 200 / prio_ratios[39];
-	if (delta > 80 || delta < 0)
-		delta = 0;
-	prio += delta;
+	/* 225 is a fudge to end up giving +80 for lowest possible prio */
+	delta = (p->deadline - jiffies) * 225 / prio_ratios[39];
+	if (delta > 0 && delta <= 80)
+		prio += delta;
 out:
 	return prio;
 }
@@ -3172,8 +3144,7 @@ SYSCALL_DEFINE3(sched_getaffinity, pid_t, pid, unsigned int, len,
  * sys_sched_yield - yield the current processor to other threads.
  *
  * This function yields the current CPU to other tasks. It does this by
- * refilling the timeslice, offsetting the deadline by the remaining
- * timeslice and scheduling away.
+ * refilling the timeslice, resetting the deadline and scheduling away.
  */
 SYSCALL_DEFINE0(sched_yield)
 {
@@ -3182,6 +3153,7 @@ SYSCALL_DEFINE0(sched_yield)
 	grq_lock_irq();
 	p = current;
 	schedstat_inc(this_rq(), yld_count);
+	update_rq_clock(task_rq(p));
 	time_slice_expired(p);
 	requeue_task(p);
 
@@ -3477,10 +3449,12 @@ void __cpuinit init_idle(struct task_struct *idle, int cpu)
 	struct rq *rq = cpu_rq(cpu);
 	unsigned long flags;
 
-	idle->timestamp = idle->last_ran = sched_clock();
+	time_grq_lock(rq, &flags);
+	idle->timestamp = idle->last_ran = rq->clock;
 	idle->state = TASK_RUNNING;
+	/* Setting prio to illegal value shouldn't matter when never queued */
+	idle->prio = PRIO_LIMIT;
 	idle->cpus_allowed = cpumask_of_cpu(cpu);
-	grq_lock_irqsave(&flags);
 	set_task_cpu(idle, cpu);
 	rq->curr = rq->idle = idle;
 	idle->oncpu = 1;
@@ -3701,11 +3675,10 @@ void sched_idle_next(void)
 	 * Strictly not necessary since rest of the CPUs are stopped by now
 	 * and interrupts disabled on the current cpu.
 	 */
-	grq_lock_irqsave(&flags);
+	time_grq_lock(rq, &flags);
 
 	__setscheduler(idle, SCHED_FIFO, MAX_RT_PRIO - 1);
 
-	update_rq_clock(rq);
 	activate_idle_task(idle);
 	rq->preempt_next = idle;
 	resched_task(rq->curr);
@@ -4025,6 +3998,8 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		deactivate_task(rq->idle);
 		rq->idle->static_prio = MAX_PRIO;
 		__setscheduler(rq->idle, SCHED_NORMAL, 0);
+		rq->idle->prio = PRIO_LIMIT;
+		update_rq_clock(rq);
 		grq_unlock_irq();
 		cpuset_unlock();
 		break;
@@ -5618,6 +5593,7 @@ void normalize_rt_tasks(void)
 
 		spin_lock_irqsave(&p->pi_lock, flags);
 		rq = __task_grq_lock(p);
+		update_rq_clock(rq);
 
 		queued = task_queued(p);
 		if (queued)
@@ -5636,7 +5612,6 @@ void normalize_rt_tasks(void)
 
 	read_unlock_irq(&tasklist_lock);
 }
-
 #endif /* CONFIG_MAGIC_SYSRQ */
 
 #ifdef CONFIG_IA64
