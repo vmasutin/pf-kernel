@@ -4685,6 +4685,15 @@ cpu_to_phys_group(int cpu, const struct cpumask *cpu_map,
 	return group;
 }
 
+/**
+ * group_first_cpu - Returns the first cpu in the cpumask of a sched_group.
+ * @group: The group whose first cpu is to be returned.
+ */
+static inline unsigned int group_first_cpu(struct sched_group *group)
+{
+	return cpumask_first(sched_group_cpus(group));
+}
+
 #ifdef CONFIG_NUMA
 /*
  * The init_sched_build_groups can't handle what we want to do with node
@@ -4723,7 +4732,7 @@ static void init_numa_sched_groups_power(struct sched_group *group_head)
 			struct sched_domain *sd;
 
 			sd = &per_cpu(phys_domains, j).sd;
-			if (j != cpumask_first(sched_group_cpus(sd->groups))) {
+			if (j != group_first_cpu(sd->groups)) {
 				/*
 				 * Only add "power" once for each
 				 * physical package.
@@ -4779,15 +4788,6 @@ static void free_sched_groups(const struct cpumask *cpu_map,
 {
 }
 #endif /* CONFIG_NUMA */
-
-/**
- * group_first_cpu - Returns the first cpu in the cpumask of a sched_group.
- * @group: The group whose first cpu is to be returned.
- */
-static inline unsigned int group_first_cpu(struct sched_group *group)
-{
-	return cpumask_first(sched_group_cpus(group));
-}
 
 /*
  * Initialize sched groups cpu_power.
