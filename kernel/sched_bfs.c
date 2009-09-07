@@ -181,7 +181,7 @@ static inline int cpu_of(struct rq *rq)
 # define finish_arch_switch(prev)	do { } while (0)
 #endif
 
-static inline void update_rq_clock(struct rq *rq)
+inline void update_rq_clock(struct rq *rq)
 {
 	rq->clock = sched_clock_cpu(cpu_of(rq));
 }
@@ -614,6 +614,49 @@ struct migration_req {
 };
 
 /*
+ * wait_task_context_switch -	wait for a thread to complete at least one
+ *				context switch.
+ *
+ * @p must not be current.
+ */
+void wait_task_context_switch(struct task_struct *p)
+{
+	unsigned long nvcsw, nivcsw, flags;
+	int running;
+	struct rq *rq;
+
+	nvcsw	= p->nvcsw;
+	nivcsw	= p->nivcsw;
+	for (;;) {
+		/*
+		 * The runqueue is assigned before the actual context
+		 * switch. We need to take the runqueue lock.
+		 *
+		 * We could check initially without the lock but it is
+		 * very likely that we need to take the lock in every
+		 * iteration.
+		 */
+		rq = task_grq_lock(p, &flags);
+		running = task_running(p);
+		task_grq_unlock(&flags);
+
+		if (likely(!running))
+			break;
+		/*
+		 * The switch count is incremented before the actual
+		 * context switch. We thus wait for two switches to be
+		 * sure at least one completed.
+		 */
+		if ((p->nvcsw - nvcsw) > 1)
+			break;
+		if ((p->nivcsw - nivcsw) > 1)
+			break;
+
+		cpu_relax();
+	}
+}
+
+/*
  * wait_task_inactive - wait for a thread to unschedule.
  *
  * If @match_state is nonzero, it's the @p->state value just checked and
@@ -828,6 +871,27 @@ found_rq:
 	return;
 }
 
+/**
+ * task_oncpu_function_call - call a function on the cpu on which a task runs
+ * @p:		the task to evaluate
+ * @func:	the function to be called
+ * @info:	the function call argument
+ *
+ * Calls the function @func when the task is currently running. This might
+ * be on the current CPU, which just calls the function directly
+ */
+void task_oncpu_function_call(struct task_struct *p,
+			      void (*func) (void *info), void *info)
+{
+	int cpu;
+
+	preempt_disable();
+	cpu = task_cpu(p);
+	if (task_curr(p))
+		smp_call_function_single(cpu, func, info, 1);
+	preempt_enable();
+}
+
 /***
  * try_to_wake_up - wake up a thread
  * @p: the to-be-woken-up thread
@@ -869,6 +933,17 @@ out_unlock:
 	return success;
 }
 
+/**
+ * wake_up_process - Wake up a specific process
+ * @p: The process to be woken up.
+ *
+ * Attempt to wake up the nominated process and move it to the set of runnable
+ * processes.  Returns 1 if the process was woken up, 0 if it was already
+ * running.
+ *
+ * It may be assumed that this function implies a write memory barrier before
+ * changing the task state if and only if any tasks are woken up.
+ */
 int wake_up_process(struct task_struct *p)
 {
 	return try_to_wake_up(p, TASK_ALL);
@@ -1130,6 +1205,7 @@ static inline void finish_task_switch(struct rq *rq, struct task_struct *prev)
 	 */
 	prev_state = prev->state;
 	finish_arch_switch(prev);
+	perf_counter_task_sched_in(current, cpu_of(rq));
 	finish_lock_switch(rq, prev);
 
 	fire_sched_in_preempt_notifiers(current);
@@ -1231,7 +1307,11 @@ unsigned long nr_running(void)
 
 unsigned long nr_uninterruptible(void)
 {
-	return grq.nr_uninterruptible;
+	long nu = grq.nr_uninterruptible;
+
+	if (unlikely(nu < 0))
+		nu = 0;
+	return (unsigned long)nu;
 }
 
 unsigned long long nr_context_switches(void)
@@ -2094,7 +2174,7 @@ EXPORT_SYMBOL(default_wake_function);
  * started to run but is not in state TASK_RUNNING.  try_to_wake_up() returns
  * zero in this (rare) case, and we handle it by continuing to scan the queue.
  */
-void __wake_up_common(wait_queue_head_t *q, unsigned int mode,
+static void __wake_up_common(wait_queue_head_t *q, unsigned int mode,
 			     int nr_exclusive, int sync, void *key)
 {
 	struct list_head *tmp, *next;
@@ -2115,6 +2195,9 @@ void __wake_up_common(wait_queue_head_t *q, unsigned int mode,
  * @mode: which threads
  * @nr_exclusive: how many wake-one or wake-many threads to wake up
  * @key: is directly passed to the wakeup function
+ *
+ * It may be assumed that this function implies a write memory barrier before
+ * changing the task state if and only if any tasks are woken up.
  */
 void __wake_up(wait_queue_head_t *q, unsigned int mode,
 			int nr_exclusive, void *key)
@@ -2153,6 +2236,9 @@ void __wake_up_locked_key(wait_queue_head_t *q, unsigned int mode, void *key)
  * with each other. This can prevent needless bouncing between CPUs.
  *
  * On UP it can prevent extra preemption.
+ *
+ * It may be assumed that this function implies a write memory barrier before
+ * changing the task state if and only if any tasks are woken up.
  */
 void __wake_up_sync_key(wait_queue_head_t *q, unsigned int mode,
 			int nr_exclusive, void *key)
@@ -2210,6 +2296,9 @@ EXPORT_SYMBOL_GPL(__wake_up_sync);	/* For internal use only */
  * awakened in the same order in which they were queued.
  *
  * See also complete_all(), wait_for_completion() and related routines.
+ *
+ * It may be assumed that this function implies a write memory barrier before
+ * changing the task state if and only if any tasks are woken up.
  */
 void complete(struct completion *x)
 {
@@ -2227,6 +2316,9 @@ EXPORT_SYMBOL(complete);
  * @x:  holds the state of this particular completion
  *
  * This will wake up all threads waiting on this particular completion event.
+ *
+ * It may be assumed that this function implies a write memory barrier before
+ * changing the task state if and only if any tasks are woken up.
  */
 void complete_all(struct completion *x)
 {
@@ -3172,6 +3264,11 @@ SYSCALL_DEFINE0(sched_yield)
 	return 0;
 }
 
+static inline int should_resched(void)
+{
+	return need_resched() && !(preempt_count() & PREEMPT_ACTIVE);
+}
+
 static void __cond_resched(void)
 {
 #ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
@@ -3191,8 +3288,7 @@ static void __cond_resched(void)
 
 int __sched _cond_resched(void)
 {
-	if (need_resched() && !(preempt_count() & PREEMPT_ACTIVE) &&
-					system_state == SYSTEM_RUNNING) {
+	if (should_resched()) {
 		__cond_resched();
 		return 1;
 	}
@@ -3210,12 +3306,12 @@ EXPORT_SYMBOL(_cond_resched);
  */
 int cond_resched_lock(spinlock_t *lock)
 {
-	int resched = need_resched() && system_state == SYSTEM_RUNNING;
+	int resched = should_resched();
 	int ret = 0;
 
 	if (spin_needbreak(lock) || resched) {
 		spin_unlock(lock);
-		if (resched && need_resched())
+		if (resched)
 			__cond_resched();
 		else
 			cpu_relax();
@@ -3230,7 +3326,7 @@ int __sched cond_resched_softirq(void)
 {
 	BUG_ON(!in_softirq());
 
-	if (need_resched() && system_state == SYSTEM_RUNNING) {
+	if (should_resched()) {
 		local_bh_enable();
 		__cond_resched();
 		local_bh_disable();
@@ -3399,8 +3495,9 @@ void sched_show_task(struct task_struct *p)
 #ifdef CONFIG_DEBUG_STACK_USAGE
 	free = stack_not_used(p);
 #endif
-	printk(KERN_CONT "%5lu %5d %6d\n", free,
-		task_pid_nr(p), task_pid_nr(p->real_parent));
+	printk(KERN_CONT "%5lu %5d %6d 0x%08lx\n", free,
+		task_pid_nr(p), task_pid_nr(p->real_parent),
+		(unsigned long)task_thread_info(p)->flags);
 
 	show_stack(p, NULL);
 }
@@ -3488,9 +3585,15 @@ cpumask_var_t nohz_cpu_mask;
 static struct {
 	atomic_t load_balancer;
 	cpumask_var_t cpu_mask;
+	cpumask_var_t ilb_grp_nohz_mask;
 } nohz ____cacheline_aligned = {
 	.load_balancer = ATOMIC_INIT(-1),
 };
+
+int get_nohz_load_balancer(void)
+{
+	return atomic_read(&nohz.load_balancer);
+}
 
 /*
  * This routine will try to nominate the ilb (idle load balancing)
@@ -4020,8 +4123,10 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 	return NOTIFY_OK;
 }
 
-/* Register at highest priority so that task migration (migrate_all_tasks)
- * happens before everything else.
+/*
+ * Register at high priority so that task migration (migrate_all_tasks)
+ * happens before everything else.  This has to be lower priority than
+ * the notifier in the perf_counter subsystem, though.
  */
 static struct notifier_block __cpuinitdata migration_notifier = {
 	.notifier_call = migration_call,
@@ -4268,22 +4373,20 @@ static void rq_attach_root(struct rq *rq, struct root_domain *rd)
 		free_rootdomain(old_rd);
 }
 
-static int __init_refok init_rootdomain(struct root_domain *rd, bool bootmem)
+static int init_rootdomain(struct root_domain *rd, bool bootmem)
 {
+	gfp_t gfp = GFP_KERNEL;
+
 	memset(rd, 0, sizeof(*rd));
 
-	if (bootmem) {
-		alloc_bootmem_cpumask_var(&def_root_domain.span);
-		alloc_bootmem_cpumask_var(&def_root_domain.online);
-		alloc_bootmem_cpumask_var(&def_root_domain.rto_mask);
-		return 0;
-	}
+	if (bootmem)
+		gfp = GFP_NOWAIT;
 
-	if (!alloc_cpumask_var(&rd->span, GFP_KERNEL))
+	if (!alloc_cpumask_var(&rd->span, gfp))
 		goto out;
-	if (!alloc_cpumask_var(&rd->online, GFP_KERNEL))
+	if (!alloc_cpumask_var(&rd->online, gfp))
 		goto free_span;
-	if (!alloc_cpumask_var(&rd->rto_mask, GFP_KERNEL))
+	if (!alloc_cpumask_var(&rd->rto_mask, gfp))
 		goto free_online;
 
 	return 0;
@@ -4493,8 +4596,9 @@ int sched_smt_power_savings = 0, sched_mc_power_savings = 0;
 
 /*
  * The cpus mask in sched_group and sched_domain hangs off the end.
- * FIXME: use cpumask_var_t or dynamic percpu alloc to avoid wasting space
- * for nr_cpu_ids < CONFIG_NR_CPUS.
+ *
+ * ( See the the comments in include/linux/sched.h:struct sched_group
+ *   and struct sched_domain. )
  */
 struct static_sched_group {
 	struct sched_group sg;
@@ -4615,7 +4719,7 @@ static void init_numa_sched_groups_power(struct sched_group *group_head)
 			struct sched_domain *sd;
 
 			sd = &per_cpu(phys_domains, j).sd;
-			if (j != cpumask_first(sched_group_cpus(sd->groups))) {
+			if (j != group_first_cpu(sd->groups)) {
 				/*
 				 * Only add "power" once for each
 				 * physical package.
@@ -4672,6 +4776,15 @@ static void free_sched_groups(const struct cpumask *cpu_map,
 }
 #endif /* CONFIG_NUMA */
 
+/**
+ * group_first_cpu - Returns the first cpu in the cpumask of a sched_group.
+ * @group: The group whose first cpu is to be returned.
+ */
+static inline unsigned int group_first_cpu(struct sched_group *group)
+{
+	return cpumask_first(sched_group_cpus(group));
+}
+
 /*
  * Initialize sched groups cpu_power.
  *
@@ -4693,7 +4806,7 @@ static void init_sched_groups_power(int cpu, struct sched_domain *sd)
 
 	WARN_ON(!sd || !sd->groups);
 
-	if (cpu != cpumask_first(sched_group_cpus(sd->groups)))
+	if (cpu != group_first_cpu(sd->groups))
 		return;
 
 	child = sd->child;
@@ -5469,6 +5582,8 @@ void __init sched_init_smp(void)
 }
 #endif /* CONFIG_SMP */
 
+unsigned int sysctl_timer_migration = 1;
+
 int in_sched_functions(unsigned long addr)
 {
 	return in_lock_functions(addr) ||
@@ -5544,13 +5659,15 @@ void __init sched_init(void)
 	init_idle(current, smp_processor_id());
 
 	/* Allocate the nohz_cpu_mask if CONFIG_CPUMASK_OFFSTACK */
-	alloc_bootmem_cpumask_var(&nohz_cpu_mask);
+	alloc_cpumask_var(&nohz_cpu_mask, GFP_NOWAIT);
 #ifdef CONFIG_SMP
 #ifdef CONFIG_NO_HZ
-	alloc_bootmem_cpumask_var(&nohz.cpu_mask);
+	alloc_cpumask_var(&nohz.cpu_mask, GFP_NOWAIT);
+	alloc_cpumask_var(&nohz.ilb_grp_nohz_mask, GFP_NOWAIT);
 #endif
-	alloc_bootmem_cpumask_var(&cpu_isolated_map);
+	alloc_cpumask_var(&cpu_isolated_map, GFP_NOWAIT);
 #endif /* SMP */
+	perf_counter_init();
 }
 
 #ifdef CONFIG_DEBUG_SPINLOCK_SLEEP
