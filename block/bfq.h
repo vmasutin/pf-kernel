@@ -156,6 +156,63 @@ struct bfq_entity {
 struct bfq_group;
 
 /**
+ * struct bfq_queue - leaf schedulable entity.
+ * @ref: reference counter.
+ * @bfqd: parent bfq_data.
+ * @sort_list: sorted list of pending requests.
+ * @next_rq: if fifo isn't expired, next request to serve.
+ * @queued: nr of requests queued in @sort_list.
+ * @allocated: currently allocated requests.
+ * @meta_pending: pending metadata requests.
+ * @fifo: fifo list of requests in sort_list.
+ * @entity: entity representing this queue in the scheduler.
+ * @max_budget: maximum budget allowed from the feedback mechanism.
+ * @budget_timeout: budget expiration (in jiffies).
+ * @dispatched: number of requests on the dispatch list or inside driver.
+ * @budgets_assigned: number of budgets assigned.
+ * @org_ioprio: saved ioprio during boosted periods.
+ * @org_ioprio_class: saved ioprio_class during boosted periods.
+ * @flags: status flags.
+ * @bfqq_list: node for active/idle bfqq list inside our bfqd.
+ * @pid: pid of the process owning the queue, used for logging purposes.
+ *
+ * A bfq_queue is a leaf request queue; it can be associated to an io_context
+ * or more (if it is an async one).  @cgroup holds a reference to the
+ * cgroup, to be sure that it does not disappear while a bfqq still
+ * references it (mostly to avoid races between request issuing and task
+ * migration followed by cgroup distruction).
+ * All the fields are protected by the queue lock of the containing bfqd.
+ */
+struct bfq_queue {
+	atomic_t ref;
+	struct bfq_data *bfqd;
+
+	struct rb_root sort_list;
+	struct request *next_rq;
+	int queued[2];
+	int allocated[2];
+	int meta_pending;
+	struct list_head fifo;
+
+	struct bfq_entity entity;
+
+	bfq_service_t max_budget;
+	unsigned long budget_timeout;
+
+	int dispatched;
+	int budgets_assigned;
+
+	unsigned short org_ioprio;
+	unsigned short org_ioprio_class;
+
+	unsigned int flags;
+
+	struct list_head bfqq_list;
+
+	pid_t pid;
+};
+
+/**
  * struct bfq_data - per device data structure.
  * @queue: request queue for the managed device.
  * @root_group: root bfq_group for the device.
@@ -244,63 +301,6 @@ struct bfq_data {
 	unsigned int bfq_user_max_budget;
 	unsigned int bfq_max_budget_async_rq;
 	unsigned int bfq_timeout[2];
-};
-
-/**
- * struct bfq_queue - leaf schedulable entity.
- * @ref: reference counter.
- * @bfqd: parent bfq_data.
- * @sort_list: sorted list of pending requests.
- * @next_rq: if fifo isn't expired, next request to serve.
- * @queued: nr of requests queued in @sort_list.
- * @allocated: currently allocated requests.
- * @meta_pending: pending metadata requests.
- * @fifo: fifo list of requests in sort_list.
- * @entity: entity representing this queue in the scheduler.
- * @max_budget: maximum budget allowed from the feedback mechanism.
- * @budget_timeout: budget expiration (in jiffies).
- * @dispatched: number of requests on the dispatch list or inside driver.
- * @budgets_assigned: number of budgets assigned.
- * @org_ioprio: saved ioprio during boosted periods.
- * @org_ioprio_class: saved ioprio_class during boosted periods.
- * @flags: status flags.
- * @bfqq_list: node for active/idle bfqq list inside our bfqd.
- * @pid: pid of the process owning the queue, used for logging purposes.
- *
- * A bfq_queue is a leaf request queue; it can be associated to an io_context
- * or more (if it is an async one).  @cgroup holds a reference to the
- * cgroup, to be sure that it does not disappear while a bfqq still
- * references it (mostly to avoid races between request issuing and task
- * migration followed by cgroup distruction).
- * All the fields are protected by the queue lock of the containing bfqd.
- */
-struct bfq_queue {
-	atomic_t ref;
-	struct bfq_data *bfqd;
-
-	struct rb_root sort_list;
-	struct request *next_rq;
-	int queued[2];
-	int allocated[2];
-	int meta_pending;
-	struct list_head fifo;
-
-	struct bfq_entity entity;
-
-	bfq_service_t max_budget;
-	unsigned long budget_timeout;
-
-	int dispatched;
-	int budgets_assigned;
-
-	unsigned short org_ioprio;
-	unsigned short org_ioprio_class;
-
-	unsigned int flags;
-
-	struct list_head bfqq_list;
-
-	pid_t pid;
 };
 
 enum bfqq_state_flags {
