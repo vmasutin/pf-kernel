@@ -266,7 +266,7 @@ struct bfq_data {
 
 	int busy_queues;
 	int queued;
-	int rq_in_driver;
+	int rq_in_driver[2];
 	int sync_flight;
 
 	int max_rq_in_driver;
@@ -435,6 +435,11 @@ bfq_entity_service_tree(struct bfq_entity *entity)
 	BUG_ON(sched_data == NULL);
 
 	return sched_data->service_tree + idx;
+}
+
+static inline int rq_in_driver(struct bfq_data *bfqd)
+{
+        return bfqd->rq_in_driver[0] + bfqd->rq_in_driver[1];
 }
 
 static inline struct bfq_queue *cic_to_bfqq(struct cfq_io_context *cic,

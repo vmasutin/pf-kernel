@@ -386,16 +386,17 @@ static void bfq_activate_request(struct request_queue *q, struct request *rq)
 {
 	struct bfq_data *bfqd = q->elevator->elevator_data;
 
-	bfqd->rq_in_driver++;
+	bfqd->rq_in_driver[rq_is_sync(rq)]++;
 	bfqd->last_position = blk_rq_pos(rq) + blk_rq_sectors(rq);
 }
 
 static void bfq_deactivate_request(struct request_queue *q, struct request *rq)
 {
 	struct bfq_data *bfqd = q->elevator->elevator_data;
+        const int sync = rq_is_sync(rq);
 
-	WARN_ON(bfqd->rq_in_driver == 0);
-	bfqd->rq_in_driver--;
+        WARN_ON(!bfqd->rq_in_driver[sync]);
+        bfqd->rq_in_driver[sync]--;
 }
 
 static void bfq_remove_request(struct request *rq)
@@ -1049,6 +1050,9 @@ static int bfq_dispatch_requests(struct request_queue *q, int force)
 				break;
 		}
 
+	        if (bfq_bfqq_idle_window(bfqq) && bfqd->rq_in_driver[BLK_RW_ASYNC])
+ 	                return 0;
+
 		if (bfqd->sync_flight != 0 && !bfq_bfqq_sync(bfqq))
 			break;
 
@@ -1422,7 +1426,7 @@ static void bfq_insert_request(struct request_queue *q, struct request *rq)
 static void bfq_update_hw_tag(struct bfq_data *bfqd)
 {
 	bfqd->max_rq_in_driver = max(bfqd->max_rq_in_driver,
-				     bfqd->rq_in_driver);
+				     rq_in_driver(bfqd));
 
 	/*
 	 * This sample is valid if the number of outstanding requests
@@ -1430,7 +1434,7 @@ static void bfq_update_hw_tag(struct bfq_data *bfqd)
 	 * sum is not exact, as it's not taking into account deactivated
 	 * requests.
 	 */
-	if (bfqd->rq_in_driver + bfqd->queued < BFQ_HW_QUEUE_THRESHOLD)
+	if (rq_in_driver(bfqd) + bfqd->queued < BFQ_HW_QUEUE_THRESHOLD)
 		return;
 
 	if (bfqd->hw_tag_samples++ < BFQ_HW_QUEUE_SAMPLES)
@@ -1451,9 +1455,9 @@ static void bfq_completed_request(struct request_queue *q, struct request *rq)
 
 	bfq_update_hw_tag(bfqd);
 
-	WARN_ON(!bfqd->rq_in_driver);
+	WARN_ON(!bfqd->rq_in_driver[sync]);
 	WARN_ON(!bfqq->dispatched);
-	bfqd->rq_in_driver--;
+	bfqd->rq_in_driver[sync]--;
 	bfqq->dispatched--;
 
 	if (bfq_bfqq_sync(bfqq))
@@ -1472,12 +1476,12 @@ static void bfq_completed_request(struct request_queue *q, struct request *rq)
 
 		if (bfq_bfqq_budget_timeout(bfqq))
 			bfq_bfqq_expire(bfqd, bfqq, 0, BFQ_BFQQ_BUDGET_TIMEOUT);
-		else if (sync && bfqd->rq_in_driver == 0 &&
+		else if (sync && rq_in_driver(bfqd) == 0 &&
 			 RB_EMPTY_ROOT(&bfqq->sort_list))
 			bfq_arm_slice_timer(bfqd);
 	}
 
-	if (!bfqd->rq_in_driver)
+	if (!rq_in_driver(bfqd))
 		bfq_schedule_dispatch(bfqd);
 }
 
