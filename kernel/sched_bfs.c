@@ -3,7 +3,6 @@
  * developed by Con Kolivas
  */
 
-
 #define rt_prio(prio)		unlikely((prio) < MAX_RT_PRIO)
 #define rt_task(p)		rt_prio((p)->prio)
 #define batch_task(p)		(unlikely((p)->policy == SCHED_BATCH))
@@ -785,7 +784,6 @@ void kick_process(struct task_struct *p)
 	preempt_enable();
 }
 EXPORT_SYMBOL_GPL(kick_process);
-
 #endif
 
 /*
@@ -1329,17 +1327,21 @@ unsigned long nr_iowait(void)
 	return sum;
 }
 
+unsigned long nr_active(void)
+{
+	return nr_running() + nr_uninterruptible();
+}
+
 /* Variables and functions for calc_load */
-static atomic_long_t calc_load_tasks;
 static unsigned long calc_load_update;
 unsigned long avenrun[3];
 EXPORT_SYMBOL(avenrun);
 
 /**
  * get_avenrun - get the load average array
- * @loads:      pointer to dest load array
- * @offset:     offset to add
- * @shift:      shift count to shift the result left
+ * @loads:	pointer to dest load array
+ * @offset:	offset to add
+ * @shift:	shift count to shift the result left
  *
  * These values are estimates at best, so no need for locking.
  */
@@ -1353,9 +1355,9 @@ void get_avenrun(unsigned long *loads, unsigned long offset, int shift)
 static unsigned long
 calc_load(unsigned long load, unsigned long exp, unsigned long active)
 {
-        load *= exp;
-        load += active * (FIXED_1 - exp);
-        return load >> FSHIFT;
+	load *= exp;
+	load += active * (FIXED_1 - exp);
+	return load >> FSHIFT;
 }
 
 /*
@@ -1364,20 +1366,22 @@ calc_load(unsigned long load, unsigned long exp, unsigned long active)
  */
 void calc_global_load(void)
 {
-        unsigned long upd = calc_load_update + 10;
-        long active;
+	unsigned long upd = calc_load_update + 10;
+	long active;
 
-        if (time_before(jiffies, upd))
-                return;
+	if (time_before(jiffies, upd))
+		return;
 
-        active = atomic_long_read(&calc_load_tasks);
-        active = active > 0 ? active * FIXED_1 : 0;
+	grq_lock();
+	active = nr_active();
+	grq_unlock();
+	active = active > 0 ? active * FIXED_1 : 0;
 
-        avenrun[0] = calc_load(avenrun[0], EXP_1, active);
-        avenrun[1] = calc_load(avenrun[1], EXP_5, active);
-        avenrun[2] = calc_load(avenrun[2], EXP_15, active);
+	avenrun[0] = calc_load(avenrun[0], EXP_1, active);
+	avenrun[1] = calc_load(avenrun[1], EXP_5, active);
+	avenrun[2] = calc_load(avenrun[2], EXP_15, active);
 
-        calc_load_update += LOAD_FREQ;
+	calc_load_update += LOAD_FREQ;
 }
 
 DEFINE_PER_CPU(struct kernel_stat, kstat);
@@ -5837,3 +5841,4 @@ void proc_sched_show_task(struct task_struct *p, struct seq_file *m)
 void proc_sched_set_task(struct task_struct *p)
 {}
 #endif
+
