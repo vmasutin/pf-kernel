@@ -4723,7 +4723,7 @@ static void init_numa_sched_groups_power(struct sched_group *group_head)
 			struct sched_domain *sd;
 
 			sd = &per_cpu(phys_domains, j).sd;
-			if (j != group_first_cpu(sd->groups)) {
+			if (j != cpumask_first(sched_group_cpus(sd->groups))) {
 				/*
 				 * Only add "power" once for each
 				 * physical package.
