@@ -85,28 +85,28 @@ int arch_update_cpu_topology(void);
 #define ARCH_HAS_SCHED_WAKE_IDLE
 /* Common values for SMT siblings */
 #ifndef SD_SIBLING_INIT
-#define SD_SIBLING_INIT (struct sched_domain) {                               \
-        .min_interval           = 1,                                    \
-        .max_interval           = 2,                                    \
-        .busy_factor            = 64,                                   \
-        .imbalance_pct          = 110,                                  \
-                                                                        \
-        .flags                  = 1*SD_LOAD_BALANCE                     \
-                                | 1*SD_BALANCE_NEWIDLE                  \
-                                | 1*SD_BALANCE_EXEC                     \
-                                | 1*SD_BALANCE_FORK                     \
-                                | 0*SD_WAKE_IDLE                        \
-                                | 1*SD_WAKE_AFFINE                      \
-                                | 1*SD_WAKE_BALANCE                     \
-                                | 1*SD_SHARE_CPUPOWER                   \
-                                | 0*SD_POWERSAVINGS_BALANCE             \
-                                | 0*SD_SHARE_PKG_RESOURCES              \
-                                | 0*SD_SERIALIZE                        \
-                                | 0*SD_WAKE_IDLE_FAR                    \
-                                | 0*SD_PREFER_SIBLING                   \
-                                ,                                       \
-        .last_balance           = jiffies,                              \
-        .balance_interval       = 1,                                    \
+#define SD_SIBLING_INIT (struct sched_domain) {				\
+	.min_interval		= 1,					\
+	.max_interval		= 2,					\
+	.busy_factor		= 64,					\
+	.imbalance_pct		= 110,					\
+									\
+	.flags			= 1*SD_LOAD_BALANCE			\
+				| 1*SD_BALANCE_NEWIDLE			\
+				| 1*SD_BALANCE_EXEC			\
+				| 1*SD_BALANCE_FORK			\
+				| 0*SD_WAKE_IDLE			\
+				| 1*SD_WAKE_AFFINE			\
+				| 1*SD_WAKE_BALANCE			\
+				| 1*SD_SHARE_CPUPOWER			\
+				| 0*SD_POWERSAVINGS_BALANCE		\
+				| 0*SD_SHARE_PKG_RESOURCES		\
+				| 0*SD_SERIALIZE			\
+				| 0*SD_WAKE_IDLE_FAR			\
+				| 0*SD_PREFER_SIBLING			\
+				,					\
+	.last_balance		= jiffies,				\
+	.balance_interval	= 1,					\
 }
 #endif
 #endif /* CONFIG_SCHED_SMT */
@@ -125,10 +125,10 @@ int arch_update_cpu_topology(void);
 	.forkexec_idx		= 1,					\
 									\
 	.flags			= 1*SD_LOAD_BALANCE			\
-				| 0*SD_BALANCE_NEWIDLE			\
+				| 1*SD_BALANCE_NEWIDLE			\
 				| 1*SD_BALANCE_EXEC			\
 				| 1*SD_BALANCE_FORK			\
-				| 1*SD_WAKE_IDLE			\
+				| 0*SD_WAKE_IDLE			\
 				| 1*SD_WAKE_AFFINE			\
 				| 1*SD_WAKE_BALANCE			\
 				| 0*SD_SHARE_CPUPOWER			\
@@ -159,10 +159,10 @@ int arch_update_cpu_topology(void);
 	.forkexec_idx		= 1,					\
 									\
 	.flags			= 1*SD_LOAD_BALANCE			\
-				| 0*SD_BALANCE_NEWIDLE			\
+				| 1*SD_BALANCE_NEWIDLE			\
 				| 1*SD_BALANCE_EXEC			\
 				| 1*SD_BALANCE_FORK			\
-				| 1*SD_WAKE_IDLE			\
+				| 0*SD_WAKE_IDLE			\
 				| 0*SD_WAKE_AFFINE			\
 				| 1*SD_WAKE_BALANCE			\
 				| 0*SD_SHARE_CPUPOWER			\
