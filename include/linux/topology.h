@@ -128,7 +128,7 @@ int arch_update_cpu_topology(void);
 				| 0*SD_BALANCE_NEWIDLE			\
 				| 1*SD_BALANCE_EXEC			\
 				| 1*SD_BALANCE_FORK			\
-				| 0*SD_WAKE_IDLE			\
+				| 1*SD_WAKE_IDLE			\
 				| 1*SD_WAKE_AFFINE			\
 				| 1*SD_WAKE_BALANCE			\
 				| 0*SD_SHARE_CPUPOWER			\
@@ -162,7 +162,7 @@ int arch_update_cpu_topology(void);
 				| 0*SD_BALANCE_NEWIDLE			\
 				| 1*SD_BALANCE_EXEC			\
 				| 1*SD_BALANCE_FORK			\
-				| 0*SD_WAKE_IDLE			\
+				| 1*SD_WAKE_IDLE			\
 				| 0*SD_WAKE_AFFINE			\
 				| 1*SD_WAKE_BALANCE			\
 				| 0*SD_SHARE_CPUPOWER			\
