@@ -315,7 +315,7 @@ static void bfq_updated_next_req(struct bfq_data *bfqd,
 	BUG_ON(entity->tree != &st->active);
 	BUG_ON(entity == entity->sched_data->active_entity);
 
-	new_budget = max(bfqq->max_budget, blk_rq_sectors(next_rq));
+	new_budget = max(bfqq->max_budget, (bfq_service_t)blk_rq_sectors(next_rq));
 	entity->budget = new_budget;
 	bfq_log_bfqq(bfqd, bfqq, "budget=%lu", new_budget);
 	bfq_activate_bfqq(bfqd, bfqq);
@@ -347,7 +347,7 @@ static void bfq_add_rq_rb(struct request *rq)
 
 	if (!bfq_bfqq_busy(bfqq)) {
 		entity->budget = max(bfqq->max_budget,
-				     blk_rq_sectors(next_rq));
+				     (bfq_service_t)blk_rq_sectors(next_rq));
 		bfq_add_bfqq_busy(bfqd, bfqq);
 	} else
 		bfq_updated_next_req(bfqd, bfqq);
@@ -721,7 +721,7 @@ static void __bfq_bfqq_recalc_budget(struct bfq_data *bfqd,
 	next_rq = bfqq->next_rq;
 	if (next_rq != NULL)
 		bfqq->entity.budget = max(bfqq->max_budget,
-					  blk_rq_sectors(next_rq));
+					  (bfq_service_t)blk_rq_sectors(next_rq));
 	bfq_log_bfqq(bfqd, bfqq, "budget=%lu (%d)", bfqq->entity.budget,
 		     bfq_bfqq_sync(bfqq));
 }
