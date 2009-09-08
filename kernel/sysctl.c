@@ -86,8 +86,8 @@ extern int percpu_pagelist_fraction;
 extern int compat_log;
 extern int latencytop_enabled;
 extern int sysctl_nr_open_min, sysctl_nr_open_max;
-extern int rr_interval;
 #ifdef CONFIG_CPU_BFS
+extern int rr_interval;
 extern int sched_iso_cpu;
 #endif
 #ifndef CONFIG_MMU
@@ -104,11 +104,18 @@ static int neg_one = -1;
 #endif
 
 static int zero;
+#ifdef CONFIG_CPU_CFS
+static int __maybe_unused one = 1;
+#endif
 static int __maybe_unused two = 2;
 static unsigned long one_ul = 1;
+#ifdef CONFIG_CPU_CFS
+static int one_hundred = 100;
+#else
 static int __read_mostly one = 1;
 static int __read_mostly one_hundred = 100;
 static int __read_mostly five_thousand = 5000;
+#endif
 
 /* this is needed for the proc_doulongvec_minmax of vm_dirty_bytes */
 static unsigned long dirty_bytes_min = 2 * PAGE_SIZE;

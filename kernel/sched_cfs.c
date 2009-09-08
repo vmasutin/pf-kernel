@@ -3,9 +3,6 @@
  * developed by Ingo Molnar
  */
 
-
-static void double_rq_lock(struct rq *rq1, struct rq *rq2);
-
 static inline int rt_policy(int policy)
 {
 	if (unlikely(policy == SCHED_FIFO || policy == SCHED_RR))
