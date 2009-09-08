@@ -103,7 +103,6 @@ int arch_update_cpu_topology(void);
 				| 0*SD_SHARE_PKG_RESOURCES		\
 				| 0*SD_SERIALIZE			\
 				| 0*SD_WAKE_IDLE_FAR			\
-				| 0*SD_PREFER_SIBLING			\
 				,					\
 	.last_balance		= jiffies,				\
 	.balance_interval	= 1,					\
@@ -198,7 +197,6 @@ int arch_update_cpu_topology(void);
 				| 0*SD_SHARE_PKG_RESOURCES		\
 				| 1*SD_SERIALIZE			\
 				| 0*SD_WAKE_IDLE_FAR			\
-				| 0*SD_PREFER_SIBLING			\
 				,					\
 	.last_balance		= jiffies,				\
 	.balance_interval	= 64,					\
