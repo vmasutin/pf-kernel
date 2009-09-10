@@ -193,6 +193,7 @@ static inline int task_running(struct task_struct *p)
 static inline void grq_lock(void)
 	__acquires(grq.lock)
 {
+	smp_mb();
 	spin_lock(&grq.lock);
 }
 
@@ -205,6 +206,7 @@ static inline void grq_unlock(void)
 static inline void grq_lock_irq(void)
 	__acquires(grq.lock)
 {
+	smp_mb();
 	spin_lock_irq(&grq.lock);
 }
 
@@ -225,7 +227,7 @@ static inline void grq_lock_irqsave(unsigned long *flags)
 	__acquires(grq.lock)
 {
 	local_irq_save(*flags);
-	spin_lock(&grq.lock);
+	grq_lock();
 }
 
 static inline void grq_unlock_irqrestore(unsigned long *flags)
@@ -389,17 +391,12 @@ static int isoprio_suitable(void)
 /*
  * Adding to the global runqueue. Enter with grq locked.
  */
-static inline void enqueue_task(struct task_struct *p)
+static void enqueue_task(struct task_struct *p)
 {
-	if (idleprio_task(p) && !rt_task(p)) {
-		if (idleprio_suitable(p))
-			p->prio = p->normal_prio;
-		else
-			p->prio = NORMAL_PRIO;
-	}
-
-	if (iso_task(p) && !rt_task(p)) {
-		if (isoprio_suitable())
+	if (!rt_task(p)) {
+		/* Check it hasn't gotten rt from PI */
+		if ((idleprio_task(p) && idleprio_suitable(p)) ||
+		   (iso_task(p) && isoprio_suitable()))
 			p->prio = p->normal_prio;
 		else
 			p->prio = NORMAL_PRIO;
@@ -432,7 +429,7 @@ static inline int prio_ratio(struct task_struct *p)
  * length. CPU distribution is handled by giving different deadlines to
  * tasks of different priorities.
  */
-static int task_timeslice(struct task_struct *p)
+static inline int task_timeslice(struct task_struct *p)
 {
 	return (rr_interval * prio_ratio(p) / 100);
 }
@@ -786,16 +783,7 @@ void kick_process(struct task_struct *p)
 EXPORT_SYMBOL_GPL(kick_process);
 #endif
 
-/*
- * We need to have a special definition for an idle runqueue when testing
- * for preemption on CONFIG_HOTPLUG_CPU as the idle task may be scheduled as
- * a realtime task in sched_idle_next.
- */
-#ifdef CONFIG_HOTPLUG_CPU
-#define rq_idle(rq)	((rq)->curr == (rq)->idle && !rt_task((rq)->curr))
-#else
-#define rq_idle(rq)	((rq)->curr == (rq)->idle)
-#endif
+#define rq_idle(rq)	((rq)->queued_prio == PRIO_LIMIT)
 
 /*
  * RT tasks preempt purely on priority. SCHED_NORMAL tasks preempt on the
@@ -1816,7 +1804,7 @@ EXPORT_SYMBOL(sub_preempt_count);
  * task that last woke up the longest ago has the earliest deadline, thus
  * ensuring that interactive tasks get low latency on wake up.
  */
-static inline unsigned long prio_deadline_diff(struct task_struct *p)
+static inline int prio_deadline_diff(struct task_struct *p)
 {
 	return (prio_ratio(p) * rr_interval * HZ / 1000 / 100) ? : 1;
 }
@@ -2596,7 +2584,8 @@ void rt_mutex_setprio(struct task_struct *p, int prio)
  */
 static void adjust_deadline(struct task_struct *p, int new_prio)
 {
-	p->deadline += prio_ratios[USER_PRIO(new_prio)] - prio_ratio(p);
+	p->deadline += (prio_ratios[USER_PRIO(new_prio)] - prio_ratio(p)) *
+			rr_interval * HZ / 1000 / 100;
 }
 
 void set_user_nice(struct task_struct *p, long nice)
@@ -2711,7 +2700,8 @@ SYSCALL_DEFINE1(nice, int, increment)
  *
  * This is the priority value as seen by users in /proc.
  * RT tasks are offset by -100. Normal tasks are centered
- * around 1, value goes from 0 to +80.
+ * around 1, value goes from 0 (SCHED_ISO) up to 82 (nice +19
+ * SCHED_IDLEPRIO).
  */
 int task_prio(const struct task_struct *p)
 {
@@ -2721,8 +2711,7 @@ int task_prio(const struct task_struct *p)
 	if (prio <= 0)
 		goto out;
 
-	/* 225 is a fudge to end up giving +80 for lowest possible prio */
-	delta = (p->deadline - jiffies) * 225 / prio_ratios[39];
+	delta = (p->deadline - jiffies) * 40 / longest_deadline();
 	if (delta > 0 && delta <= 80)
 		prio += delta;
 out:
