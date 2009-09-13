@@ -38,9 +38,9 @@
 #define SCHED_BATCH		3
 #define SCHED_ISO		4
 #define SCHED_IDLE		5
-#define SCHED_IDLEPRIO		(SCHED_IDLE)
 
 #ifdef CONFIG_CPU_BFS
+# define SCHED_IDLEPRIO		(SCHED_IDLE)
 # define SCHED_MAX		(SCHED_IDLEPRIO)
 # define SCHED_RANGE(policy)	((policy) <= SCHED_MAX)
 #endif
