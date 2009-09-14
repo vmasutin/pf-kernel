@@ -48,6 +48,7 @@ struct global_rq {
 #ifdef CONFIG_SMP
 	cpumask_t cpu_idle_map;
 #endif
+	void (*wunt)(struct task_struct *, struct rq *, unsigned long);
 };
 
 static struct global_rq grq;
@@ -812,7 +813,7 @@ static inline int task_preempts_curr(struct task_struct *p, struct rq *rq)
 	if (p->prio < curr->prio)
 		preempts = 1;
 	else if (p->policy == SCHED_NORMAL && (p->prio == curr->prio &&
-		 p->deadline < rq->rq_deadline))
+		 time_before(p->deadline, rq->rq_deadline)))
 			preempts = 1;
 	return preempts;
 }
@@ -823,52 +824,50 @@ static inline int task_preempts_curr(struct task_struct *p, struct rq *rq)
 static void try_preempt(struct task_struct *p, struct rq *this_rq)
 {
 	unsigned long latest_deadline, cpu;
-	struct rq *lowest_prio_rq;
-	int lowest_prio;
+	struct rq *highest_prio_rq;
+	int highest_prio;
 	cpumask_t tmp;
 
 	/* Use this_rq as baseline and fall back on */
-	lowest_prio_rq = this_rq;
-
-	if (cpu_isset(this_rq->cpu, p->cpus_allowed) && rq_idle(this_rq)) {
-		/* this_rq is idle, use that. */
-		lowest_prio_rq = this_rq;
-		goto found_rq;
-	}
-
+	if (cpu_isset(this_rq->cpu, p->cpus_allowed)) {
+		highest_prio_rq = this_rq;
+		/* If this_rq is idle, use that. */
+		if (rq_idle(this_rq))
+			goto found_rq;
+	} else
+		highest_prio_rq = cpu_rq(any_online_cpu(p->cpus_allowed));
 	latest_deadline = this_rq->rq_deadline;
-	lowest_prio = this_rq->rq_prio;
+	highest_prio = this_rq->rq_prio;
 
 	cpus_and(tmp, cpu_online_map, p->cpus_allowed);
+
 	for_each_cpu_mask(cpu, tmp) {
-		unsigned long rq_deadline;
-		int rq_prio;
 		struct rq *rq;
+		int rq_prio;
 
 		rq = cpu_rq(cpu);
 
 		if (rq_idle(rq)) {
 			/* found an idle rq, use that one */
-			lowest_prio_rq = rq;
+			highest_prio_rq = rq;
 			goto found_rq;
 		}
 
 		rq_prio = rq->rq_prio;
-		rq_deadline = rq->rq_deadline;
-		if (rq_prio < lowest_prio ||
-			(rq_prio == lowest_prio &&
-			rq_deadline > latest_deadline)) {
-				lowest_prio = rq_prio;
-				latest_deadline = rq_deadline;
-				lowest_prio_rq = rq;
+		if (rq_prio > highest_prio ||
+			(rq_prio == highest_prio &&
+			time_after(rq->rq_deadline, latest_deadline))) {
+				highest_prio = rq_prio;
+				latest_deadline = rq->rq_deadline;
+				highest_prio_rq = rq;
 		}
 	}
 
-	if (!task_preempts_curr(p, lowest_prio_rq))
+	if (!task_preempts_curr(p, highest_prio_rq))
 		return;
 found_rq:
-	resched_task(lowest_prio_rq->curr);
-	lowest_prio_rq->preempt_next = p;
+	resched_task(highest_prio_rq->curr);
+	highest_prio_rq->preempt_next = p;
 	return;
 }
 
@@ -1049,13 +1048,11 @@ out:
  * that must be done for every newly created context, then puts the task
  * on the runqueue and wakes it.
  */
-void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
+static void
+normal_wunt(struct task_struct *p, struct rq *rq, unsigned long clone_flags)
 {
-	struct task_struct *parent;
-	unsigned long flags;
-	struct rq *rq  = time_task_grq_lock(p, &flags);
+	struct task_struct *parent = p->parent;
 
-	parent = p->parent;
 	BUG_ON(p->state != TASK_RUNNING);
 	set_task_cpu(p, task_cpu(parent));
 
@@ -1072,7 +1069,40 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 			rq->preempt_next = p;
 	} else
 		try_preempt(p, rq);
-	task_grq_unlock(&flags);
+}
+
+extern int fragile_boot;
+
+/* Fragile version to not wake to other cpus during boot */
+static void
+fb_wunt(struct task_struct *p, struct rq *rq, unsigned long clone_flags)
+{
+	struct task_struct *parent = p->parent;
+
+	BUG_ON(p->state != TASK_RUNNING);
+	set_task_cpu(p, task_cpu(parent));
+
+	activate_task(p, rq);
+	trace_sched_wakeup_new(rq, p, 1);
+	/* Child always runs first */
+	set_tsk_need_resched(parent);
+	rq->preempt_next = p;
+	/*
+	 * fragile_boot is set initially and unset only once just before
+	 * init so we change to normal wunt from here onwards, the ->wunt
+	 * pointer is protected by grq lock.
+	 */
+	if (!fragile_boot)
+		grq.wunt = normal_wunt;
+}
+
+void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
+{
+	unsigned long flags;
+
+	struct rq *rq = time_task_grq_lock(p, &flags);
+	grq.wunt(p, rq, clone_flags);
+	grq_unlock_irqrestore(&flags);
 }
 
 /*
@@ -5821,6 +5851,7 @@ void __init sched_init(void)
 	cpus_clear(grq.cpu_idle_map);
 #endif
 	spin_lock_init(&grq.lock);
+	grq.wunt = fb_wunt;
 	for_each_possible_cpu(i) {
 		struct rq *rq;
 
