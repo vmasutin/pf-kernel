@@ -353,11 +353,9 @@ bound tasks substantially but at the expense of increased latencies
 overall. Conversely decreasing it will decrease average and maximum
 latencies but at the expense of throughput. This value is in
 milliseconds and the default value chosen depends on the number of
-cpus available at scheduler initialisation with a minimum of 6. The
-value can be set to 0 which means no more than one tick (limited
-by HZ resolution).
+cpus available at scheduler initialisation with a minimum of 6.
 
-Valid values are from 0-5000.
+Valid values are from 1-5000.
 
 ==============================================================
 

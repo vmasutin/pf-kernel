@@ -829,8 +829,6 @@ static void run_init_process(char *init_filename)
 	kernel_execve(init_filename, argv_init, envp_init);
 }
 
-int fragile_boot __read_mostly = 1;
-
 /* This is a non __init function. Force it to be noinline otherwise gcc
  * makes it inline to init() and it becomes part of init.text section
  */
@@ -852,9 +850,6 @@ static noinline int init_post(void)
 	(void) sys_dup(0);
 
 	current->signal->flags |= SIGNAL_UNKILLABLE;
-
-	printk(KERN_INFO "Disabling Fragile boot.\n");
-	fragile_boot = 0;
 
 	if (ramdisk_execute_command) {
 		run_init_process(ramdisk_execute_command);
