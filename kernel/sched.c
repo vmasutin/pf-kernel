@@ -129,10 +129,6 @@
  */
 #define RUNTIME_INF	((u64)~0ULL)
 
-#ifdef CONFIG_CPU_CFS
-static void double_rq_lock(struct rq *rq1, struct rq *rq2);
-#endif
-
 /*
  * Implement selected CPU scheduler
  */

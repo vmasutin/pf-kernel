@@ -1577,6 +1577,8 @@ static inline void update_shares_locked(struct rq *rq, struct sched_domain *sd)
 
 #ifdef CONFIG_PREEMPT
 
+static void double_rq_lock(struct rq *rq1, struct rq *rq2);
+
 /*
  * fair double_lock_balance: Safely acquires both rq->locks in a fair
  * way at the expense of forcing extra atomic operations in all
