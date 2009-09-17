@@ -3894,21 +3894,6 @@ void wake_up_idle_cpu(int cpu)
 }
 #endif /* CONFIG_NO_HZ */
 
-static u64 sched_avg_period(void)
-{
-	return (u64)sysctl_sched_time_avg * NSEC_PER_MSEC / 2;
-}
-
-static void sched_avg_update(struct rq *rq)
-{
-	s64 period = sched_avg_period();
-
-	while ((s64)(rq->clock - rq->age_stamp) > period) {
-		rq->age_stamp += period;
-		rq->rt_avg /= 2;
-	}
-}
-
 /*
  * Change a given task's CPU affinity. Migrate the thread to a
  * proper CPU and schedule it away if the CPU it's executing on
@@ -5101,6 +5086,8 @@ static void init_sched_groups_power(int cpu, struct sched_domain *sd)
 {
 	struct sched_domain *child;
 	struct sched_group *group;
+	long power;
+	int weight;
 
 	WARN_ON(!sd || !sd->groups);
 
@@ -5111,22 +5098,22 @@ static void init_sched_groups_power(int cpu, struct sched_domain *sd)
 
 	sd->groups->cpu_power = 0;
 
-	if (!child) {
-		power = SCHED_LOAD_SCALE;
-		weight = cpumask_weight(sched_domain_span(sd));
-		/*
-		 * SMT siblings share the power of a single core.
-		 * Usually multiple threads get a better yield out of
-		 * that one core than a single thread would have,
-		 * reflect that in sd->smt_gain.
-		 */
-		if ((sd->flags & SD_SHARE_CPUPOWER) && weight > 1) {
-			power *= sd->smt_gain;
-			power /= weight;
-			power >>= SCHED_LOAD_SHIFT;
-		}
-		sd->groups->cpu_power += power;
-		returin;
+        if (!child) {
+                power = SCHED_LOAD_SCALE;
+                weight = cpumask_weight(sched_domain_span(sd));
+                /*
+                 * SMT siblings share the power of a single core.
+                 * Usually multiple threads get a better yield out of
+                 * that one core than a single thread would have,
+                 * reflect that in sd->smt_gain.
+                 */
+                if ((sd->flags & SD_SHARE_CPUPOWER) && weight > 1) {
+                        power *= sd->smt_gain;
+                        power /= weight;
+                        power >>= SCHED_LOAD_SHIFT;
+                }
+                sd->groups->cpu_power += power;
+		return;
 	}
 
 	/*
@@ -5336,7 +5323,7 @@ static struct sched_domain *__build_mc_sched_domain(struct s_data *d,
 	cpumask_and(sched_domain_span(sd), cpu_map, cpu_coregroup_mask(i));
 	sd->parent = parent;
 	parent->child = sd;
-	cpu_to_core_group(i, cpu_map, &sd->groups, d->tmpmask)
+	cpu_to_core_group(i, cpu_map, &sd->groups, d->tmpmask);
 #endif
 	return sd;
 }
@@ -5774,50 +5761,6 @@ unsigned long __weak arch_scale_smt_power(struct sched_domain *sd, int cpu)
 	smt_gain /= weight;
 
 	return smt_gain;
-}
-
-static void update_cpu_power(struct sched_domain *sd, int cpu)
-{
-	unsigned long weight = cpumask_weight(sched_domain_span(sd));
-	unsigned long power = SCHED_LOAD_SCALE;
-	struct sched_group *sdg = sd->groups;
-
-	/* here we could scale based on cpufreq */
-
-	if ((sd->flags & SD_SHARE_CPUPOWER) && weight > 1) {
-		power *= arch_scale_smt_power(sd, cpu);
-		power >>= SCHED_LOAD_SHIFT;
-	}
-
-	power *= scale_rt_power(cpu);
-	power >>= SCHED_LOAD_SHIFT;
-
-	if (!power)
-		power = 1;
-
-	sdg->cpu_power = power;
-}
-
-static void update_group_power(struct sched_domain *sd, int cpu)
-{
-	struct sched_domain *child = sd->child;
-	struct sched_group *group, *sdg = sd->groups;
-	unsigned long power;
-
-	if (!child) {
-		update_cpu_power(sd, cpu);
-		return;
-	}
-
-	power = 0;
-
-	group = child->groups;
-	do {
-		power += group->cpu_power;
-		group = group->next;
-	} while (group != child->groups);
-
-	sdg->cpu_power = power;
 }
 
 #ifndef CONFIG_CPUSETS
