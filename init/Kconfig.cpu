@@ -19,8 +19,6 @@ config CPU_BFS
 	  by Con Kolivas. It is designed for ultra low latency and excellent
 	  desktop performance.
 
-	  It is not recommened for 4096 CPUs.
-
 endchoice
 
 config CPU_BFS_AUTOISO
