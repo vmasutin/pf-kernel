@@ -22,15 +22,3 @@ config CPU_BFS
 	  It is not recommened for 4096 CPUs.
 
 endchoice
-
-config CPU_BFS_AUTOISO
-        bool "Auto SCHED_ISO for X"
-        depends on CPU_BFS
-        help
-          Enable this to automatically enable SCHED_ISO for X
-
-config CPU_RENICE_X
-	bool "Renice X to -10"
-	depends on !CPU_BFS_AUTOISO
-	help
-	  Enable this to Renice X to -10
