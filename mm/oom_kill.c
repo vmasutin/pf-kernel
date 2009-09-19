@@ -340,6 +340,9 @@ static void __oom_kill_task(struct task_struct *p, int verbose)
 	 */
 #ifdef CONFIG_CPU_BFS
 	p->time_slice = HZ;
+#elif CONFIG_CFS_BOOST
+	if (p->policy == SCHED_NORMAL || p->policy == SCHED_BATCH)
+		sched_privileged_task(p);
 #else
 	p->rt.time_slice = HZ;
 #endif

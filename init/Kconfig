@@ -108,16 +108,6 @@ config LOCALVERSION_AUTO
 
 source "init/Kconfig.cpu"
 
-if CPU_BFS
-
-config CPU_BFS_AUTOISO
-        bool "Auto SCHED_ISO for X"
-        depends on CPU_BFS
-        help
-          Enable this to automatically enable SCHED_ISO for X
-
-endif
-
 config HAVE_KERNEL_GZIP
 	bool
 
