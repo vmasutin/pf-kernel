@@ -6059,6 +6059,7 @@ out_unlock:
 }
 EXPORT_SYMBOL(set_user_nice);
 
+#ifdef CONFIG_CFS_BOOST
 /*
  * Nice level for privileged tasks. (can be set to 0 for this
  * to be turned off)
@@ -6097,6 +6098,7 @@ void sched_privileged_task(struct task_struct *p)
 	set_user_nice(p, new_nice);
 }
 EXPORT_SYMBOL(sched_privileged_task);
+#endif
 
 /*
  * can_nice - check if a task can reduce its nice value

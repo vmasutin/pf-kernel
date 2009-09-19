@@ -1919,7 +1919,7 @@ static inline int rt_mutex_getprio(struct task_struct *p)
 #endif
 
 extern void set_user_nice(struct task_struct *p, long nice);
-#ifdef CONFIG_CPU_CFS
+#ifdef CONFIG_CFS_BOOST
 extern void sched_privileged_task(struct task_struct *p);
 extern int sysctl_sched_privileged_nice_level;
 #endif

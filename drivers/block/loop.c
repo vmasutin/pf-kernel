@@ -593,7 +593,7 @@ static int loop_thread(void *data)
 	struct loop_device *lo = data;
 	struct bio *bio;
 
-#if defined(CONFIG_CPU_CFS)
+#if defined(CONFIG_CFS_BOOST)
 	/*
 	 * The loop thread is important enough to be given a boost:
 	 */
