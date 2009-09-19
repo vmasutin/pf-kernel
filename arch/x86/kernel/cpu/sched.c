@@ -6,7 +6,7 @@
 #include <asm/cpufeature.h>
 #include <asm/processor.h>
 
-#ifdef CONFIG_SMP
+#if defined(CONFIG_SMP) && defined(CONFIG_CPU_CFS)
 
 static DEFINE_PER_CPU(struct aperfmperf, old_perf_sched);
 
