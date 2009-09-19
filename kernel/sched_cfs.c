@@ -6064,7 +6064,7 @@ EXPORT_SYMBOL(set_user_nice);
  * Nice level for privileged tasks. (can be set to 0 for this
  * to be turned off)
  */
-int sysctl_sched_privileged_nice_level __read_mostly = -10;
+int sysctl_sched_privileged_nice_level __read_mostly = CONFIG_CFS_BOOST_NICE;
 
 static int __init privileged_nice_level_setup(char *str)
 {

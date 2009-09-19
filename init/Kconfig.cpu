@@ -43,3 +43,9 @@ config CFS_BOOST
 
 	  Say Y here if you are building a kernel for a desktop system.
 	  Say N here if you want X to be treated as a normal task.
+
+config CFS_BOOST_NICE
+	int "Nice value for privileged tasks"
+	depends on CFS_BOOST
+	range -20 19
+	default -10
