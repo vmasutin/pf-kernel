@@ -5391,7 +5391,7 @@ static int __build_sched_domains(const struct cpumask *cpu_map,
 #endif
 
 	for_each_cpu(i, cpu_map) {
-		sd = &per_cpu(core_domains, i).sd;
+		sd = &per_cpu(phys_domains, i).sd;
 		init_sched_groups_power(i, sd);
 	}
 
