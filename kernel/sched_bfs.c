@@ -488,6 +488,16 @@ static int suitable_idle_cpus(struct task_struct *p)
 	return (cpus_intersects(p->cpus_allowed, grq.cpu_idle_map));
 }
 
+static inline void resched_suitable_idle(struct task_struct *p)
+{
+	cpumask_t tmp;
+
+	cpus_and(tmp, p->cpus_allowed, grq.cpu_idle_map);
+
+	if (!cpus_empty(tmp))
+		wake_up_idle_cpu(first_cpu(tmp));
+}
+
 #else /* CONFIG_SMP */
 static inline void inc_qnr(void)
 {
@@ -514,6 +524,10 @@ static inline void clear_cpuidle_map(unsigned long cpu)
 static int suitable_idle_cpus(struct task_struct *p)
 {
 	return 0;
+}
+
+static inline void resched_suitable_idle(struct task_struct *p)
+{
 }
 #endif /* CONFIG_SMP */
 
@@ -2092,16 +2106,6 @@ out_take:
 	take_task(rq, edt);
 out:
 	return edt;
-}
-
-static inline void resched_suitable_idle(struct task_struct *p)
-{
-	cpumask_t tmp;
-
-	cpus_and(tmp, p->cpus_allowed, grq.cpu_idle_map);
-
-	if (!cpus_empty(tmp))
-		wake_up_idle_cpu(first_cpu(tmp));
 }
 
 /*
