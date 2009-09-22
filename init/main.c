@@ -876,6 +876,22 @@ static noinline int init_post(void)
 	panic("No init found.  Try passing init= option to kernel.");
 }
 
+#ifdef CONFIG_CPU_BFS
+extern int rr_interval;
+
+static void __init set_rr_interval(void)
+{
+	rr_interval = 6;
+
+	/*
+	 * Assume that every added cpu gives us slightly less overall latency
+	 * allowing us to increase the base rr_interval, but in a non linear
+	 * fashion.
+	 */
+	rr_interval *= 1 + ilog2(num_online_cpus());
+}
+#endif
+
 static int __init kernel_init(void * unused)
 {
 	lock_kernel();
@@ -922,6 +938,11 @@ static int __init kernel_init(void * unused)
 		ramdisk_execute_command = NULL;
 		prepare_namespace();
 	}
+
+#ifdef CONFIG_CPU_BFS
+	set_rr_interval();
+	smp_mb();
+#endif
 
 	/*
 	 * Ok, we have completed the initial bootup, and
