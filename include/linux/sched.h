@@ -36,7 +36,9 @@
 #define SCHED_FIFO		1
 #define SCHED_RR		2
 #define SCHED_BATCH		3
+#ifdef CONFIG_CPU_BFS
 #define SCHED_ISO		4
+#endif
 #define SCHED_IDLE		5
 
 #ifdef CONFIG_CPU_BFS
@@ -276,7 +278,7 @@ extern void init_idle_bootup_task(struct task_struct *idle);
 extern int grunqueue_is_locked(void);
 extern void grq_unlock_wait(void);
 #else
-extern int runqueue_is_locked(void);
+extern int runqueue_is_locked(int cpu);
 extern void task_rq_unlock_wait(struct task_struct *p);
 #endif
 
@@ -1098,6 +1100,10 @@ struct sched_class {
 			     int running);
 	void (*prio_changed) (struct rq *this_rq, struct task_struct *task,
 			     int oldprio, int running);
+
+#ifdef CONFIG_CPU_CFS
+	unsigned int (*get_rr_interval) (struct task_struct *task);
+#endif
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	void (*moved_group) (struct task_struct *p);
