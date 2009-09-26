@@ -275,7 +275,7 @@ extern void init_idle(struct task_struct *idle, int cpu);
 extern void init_idle_bootup_task(struct task_struct *idle);
 
 #ifdef CONFIG_CPU_BFS
-extern int grunqueue_is_locked(void);
+extern int grunqueue_is_locked(int cpu);
 extern void grq_unlock_wait(void);
 #else
 extern int runqueue_is_locked(int cpu);
