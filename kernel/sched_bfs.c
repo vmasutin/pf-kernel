@@ -63,8 +63,6 @@ struct rq {
 	unsigned char in_nohz_recently;
 #endif
 #endif
-	/* runqueue lock: */
-	spinlock_t lock;
 
 	struct task_struct *curr, *idle;
 	struct mm_struct *prev_mm;
@@ -292,7 +290,7 @@ static inline void task_grq_unlock(unsigned long *flags)
  */
 inline int grunqueue_is_locked(void)
 {
-	return spin_is_locked(&cpu_rq(cpu)->lock);
+	return spin_is_locked(&grq.lock);
 }
 
 inline void grq_unlock_wait(void)
