@@ -1216,12 +1216,13 @@ struct task_struct {
 
 	int lock_depth;		/* BKL lock depth */
 
-#if defined(CONFIG_CPU_BFS) || (defined(CONFIG_SMP) && defined(__ARCH_WANT_UNLOCKED_CTXSW))
-	int oncpu;
+#ifdef CONFIG_SMP
+#ifdef __ARCH_WANT_UNLOCKED_CTXSW
+        int oncpu;
+#endif
 #endif
 
 #ifdef CONFIG_CPU_BFS
-	int load_weight;	/* for niceness load balancing purposes */
 	int time_slice, first_time_slice;
 	unsigned long deadline;
 	struct list_head run_list;
@@ -1231,11 +1232,9 @@ struct task_struct {
 	unsigned int rt_priority;
 
 #ifdef CONFIG_CPU_BFS
-	unsigned long long timestamp, last_ran;
+	u64 last_ran;
 	u64 sched_time; /* sched_clock time spent running */
 
-	/* Compatibility crap */
-	int rt_nr_cpus_allowed;
 	unsigned long rt_timeout;
 #else
 	const struct sched_class *sched_class;

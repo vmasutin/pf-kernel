@@ -74,6 +74,7 @@ struct rq {
 	unsigned long rq_deadline;
 	unsigned int rq_policy;
 	int rq_time_slice;
+	u64 rq_last_ran;
 	int rq_prio;
 
 	/* Accurate timekeeping data */
@@ -190,11 +191,6 @@ inline void update_rq_clock(struct rq *rq)
 	rq->clock = sched_clock_cpu(cpu_of(rq));
 }
 
-static inline int task_running(struct task_struct *p)
-{
-	return (!!p->oncpu);
-}
-
 static inline void grq_lock(void)
 	__acquires(grq.lock)
 {
@@ -294,12 +290,12 @@ static inline void task_grq_unlock(unsigned long *flags)
  * This interface allows printk to be called with the runqueue lock
  * held and know whether or not it is OK to wake up the klogd.
  */
-int grunqueue_is_locked(int cpu)
+inline int grunqueue_is_locked(void)
 {
 	return spin_is_locked(&cpu_rq(cpu)->lock);
 }
 
-void grq_unlock_wait(void)
+inline void grq_unlock_wait(void)
 	__releases(grq.lock)
 {
 	smp_mb(); /* spin-unlock-wait is not a full memory barrier */
@@ -326,7 +322,17 @@ static inline void __task_grq_unlock(void)
 	grq_unlock();
 }
 
+static inline int task_current(struct rq *rq, struct task_struct *p)
+{
+	return rq->curr == p;
+}
+
 #ifndef __ARCH_WANT_UNLOCKED_CTXSW
+static inline int task_running(struct rq *rq, struct task_struct *p)
+{
+	return task_current(rq, p);
+}
+
 static inline void prepare_lock_switch(struct rq *rq, struct task_struct *next)
 {
 }
@@ -348,9 +354,20 @@ static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 }
 
 #else /* __ARCH_WANT_UNLOCKED_CTXSW */
+static inline int task_running(struct rq *rq, struct task_struct *p)
+{
+#ifdef CONFIG_SMP
+	return p->oncpu;
+#else
+	return task_current(rq, p);
+#endif
+}
 
 static inline void prepare_lock_switch(struct rq *rq, struct task_struct *next)
 {
+#ifdef CONFIG_SMP
+	next->oncpu = 1;
+#endif
 #ifdef __ARCH_WANT_INTERRUPTS_ON_CTXSW
 	grq_unlock_irq();
 #else
@@ -360,7 +377,15 @@ static inline void prepare_lock_switch(struct rq *rq, struct task_struct *next)
 
 static inline void finish_lock_switch(struct rq *rq, struct task_struct *prev)
 {
+#ifdef CONFIG_SMP
+	/*
+	 * After ->oncpu is cleared, the task can be moved to a different CPU.
+	 * We must ensure this doesn't happen until the switch is completely
+	 * finished.
+	 */
 	smp_wmb();
+	prev->oncpu = 0;
+#endif
 #ifndef __ARCH_WANT_INTERRUPTS_ON_CTXSW
 	local_irq_enable();
 #endif
@@ -381,9 +406,9 @@ static inline int task_queued(struct task_struct *p)
 	return (!list_empty(&p->run_list));
 }
 
-static inline int task_queued_only(struct task_struct *p)
+static inline int task_queued_only(struct task_struct *p, struct rq *rq)
 {
-	return (!list_empty(&p->run_list) && !task_running(p));
+	return (!list_empty(&p->run_list) && !task_running(rq, p));
 }
 
 /*
@@ -523,7 +548,7 @@ static inline void clear_cpuidle_map(unsigned long cpu)
 }
 
 /* Always called from a busy cpu on UP */
-static int suitable_idle_cpus(struct task_struct *p)
+static inline int suitable_idle_cpus(struct task_struct *p)
 {
 	return 0;
 }
@@ -579,7 +604,10 @@ static int effective_prio(struct task_struct *p)
  */
 static void activate_task(struct task_struct *p, struct rq *rq)
 {
-	u64 now = rq->clock;
+	u64 now;
+
+	update_rq_clock(rq);
+	now = rq->clock;
 
 	/*
 	 * Sleep time is in units of nanosecs, so shift by 20 to get a
@@ -589,11 +617,10 @@ static void activate_task(struct task_struct *p, struct rq *rq)
 	if (unlikely(prof_on == SLEEP_PROFILING)) {
 		if (p->state == TASK_UNINTERRUPTIBLE)
 			profile_hits(SLEEP_PROFILING, (void *)get_wchan(p),
-				     (now - p->timestamp) >> 20);
+				     (now - p->last_ran) >> 20);
 	}
 
 	p->prio = effective_prio(p);
-	p->timestamp = now;
 	if (task_contributes_to_load(p))
 		grq.nr_uninterruptible--;
 	enqueue_task(p);
@@ -616,6 +643,8 @@ static inline void deactivate_task(struct task_struct *p)
 void set_task_cpu(struct task_struct *p, unsigned int cpu)
 {
 	trace_sched_migrate_task(p, cpu);
+	perf_swcounter_event(PERF_COUNT_SW_CPU_MIGRATIONS,
+				     1, 1, NULL, 0);
 	/*
 	 * After ->cpu is set up to a new value, task_grq_lock(p, ...) can be
 	 * successfuly executed on another CPU. We must ensure that updates of
@@ -738,7 +767,7 @@ void wait_task_context_switch(struct task_struct *p)
 		 * iteration.
 		 */
 		rq = task_grq_lock(p, &flags);
-		running = task_running(p);
+		running = task_running(rq, p);
 		task_grq_unlock(&flags);
 
 		if (likely(!running))
@@ -781,39 +810,9 @@ unsigned long wait_task_inactive(struct task_struct *p, long match_state)
 	struct rq *rq;
 
 	for (;;) {
-		/*
-		 * We do the initial early heuristics without holding
-		 * any task-queue locks at all. We'll only try to get
-		 * the runqueue lock when things look like they will
-		 * work out!
-		 */
-		rq = task_rq(p);
-
-		/*
-		 * If the task is actively running on another CPU
-		 * still, just relax and busy-wait without holding
-		 * any locks.
-		 *
-		 * NOTE! Since we don't hold any locks, it's not
-		 * even sure that "rq" stays as the right runqueue!
-		 * But we don't care, since this will
-		 * return false if the runqueue has changed and p
-		 * is actually now running somewhere else!
-		 */
-		while (task_running(p) && p == rq->curr) {
-			if (match_state && unlikely(p->state != match_state))
-				return 0;
-			cpu_relax();
-		}
-
-		/*
-		 * Ok, time to look more closely! We need the grq
-		 * lock now, to be *sure*. If we're wrong, we'll
-		 * just go back and repeat.
-		 */
 		rq = task_grq_lock(p, &flags);
 		trace_sched_wait_task(rq, p);
-		running = task_running(p);
+		running = task_running(rq, p);
 		on_rq = task_queued(p);
 		ncsw = 0;
 		if (!match_state || p->state == match_state)
@@ -905,33 +904,32 @@ static inline int task_preempts_curr(struct task_struct *p, struct rq *rq)
 	else if (p->policy == SCHED_NORMAL && (p->prio == rq->rq_prio &&
 		 time_before(p->deadline, rq->rq_deadline)))
 			preempts = 1;
+
 	return preempts;
 }
 
 /*
  * Wake up *any* suitable cpu to schedule this task.
  */
-static void try_preempt(struct task_struct *p)
+static void try_preempt(struct task_struct *p, struct rq *this_rq)
 {
-	struct rq *highest_prio_rq, *this_rq;
 	unsigned long latest_deadline, cpu;
+	struct rq *highest_prio_rq;
 	int highest_prio;
 	cpumask_t tmp;
 
-	/* Try the task's previous rq first and as a fallback */
-	this_rq = task_rq(p);
+	cpus_and(tmp, cpu_online_map, p->cpus_allowed);
 
-	if (cpu_isset(this_rq->cpu, p->cpus_allowed)) {
+	/* Use this_rq as fallback */
+	if (likely(cpu_isset(this_rq->cpu, tmp))) {
 		highest_prio_rq = this_rq;
 		/* If this_rq is idle, use that. */
-		if (rq_idle(this_rq))
+		if (rq_idle(highest_prio_rq))
 			goto found_rq;
 	} else
-		highest_prio_rq = cpu_rq(any_online_cpu(p->cpus_allowed));
-	latest_deadline = this_rq->rq_deadline;
-	highest_prio = this_rq->rq_prio;
-
-	cpus_and(tmp, cpu_online_map, p->cpus_allowed);
+		highest_prio_rq = cpu_rq(any_online_cpu(tmp));
+	latest_deadline = highest_prio_rq->rq_deadline;
+	highest_prio = highest_prio_rq->rq_prio;
 
 	for_each_cpu_mask(cpu, tmp) {
 		struct rq *rq;
@@ -946,12 +944,11 @@ static void try_preempt(struct task_struct *p)
 		}
 
 		rq_prio = rq->rq_prio;
-		if (rq_prio > highest_prio ||
-			(rq_prio == highest_prio &&
-			time_after(rq->rq_deadline, latest_deadline))) {
-				highest_prio = rq_prio;
-				latest_deadline = rq->rq_deadline;
-				highest_prio_rq = rq;
+		if (rq_prio > highest_prio || (rq_prio == highest_prio &&
+		    time_after(rq->rq_deadline, latest_deadline))) {
+			highest_prio = rq_prio;
+			latest_deadline = rq->rq_deadline;
+			highest_prio_rq = rq;
 		}
 	}
 
@@ -1001,18 +998,22 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state, int sync)
 {
 	unsigned long flags;
 	int success = 0;
-	long old_state;
 	struct rq *rq;
 
-	rq = time_task_grq_lock(p, &flags);
-	old_state = p->state;
-	if (!(old_state & state))
+	/*
+	 * No need to do time_lock_grq as we only need to update the rq clock
+	 * if we activate the task
+	 */
+	rq = task_grq_lock(p, &flags);
+
+	/* state is a volatile long, どうして、分からない */
+	if (!(unsigned int)p->state & state)
 		goto out_unlock;
 
 	/*
 	 * Note this catches tasks that are running and queued, but returns
 	 * false during the context switch when they're running and no
-	 * longer queued.
+	 * longer queued (rare).
 	 */
 	if (task_queued(p))
 		goto out_running;
@@ -1024,8 +1025,9 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state, int sync)
 	 * don't trigger a preemption if there are no idle cpus,
 	 * instead waiting for current to deschedule.
 	 */
-	if (!sync || (sync && suitable_idle_cpus(p)))
-		try_preempt(p);
+	if ((!sync || (sync && suitable_idle_cpus(p))) &&
+	    !task_running(rq,p))
+		try_preempt(p, rq);
 	success = 1;
 
 out_running:
@@ -1093,8 +1095,9 @@ void sched_fork(struct task_struct *p, int clone_flags)
 		memset(&p->sched_info, 0, sizeof(p->sched_info));
 #endif
 
+#if defined(CONFIG_SMP) && defined(__ARCH_WANT_UNLOCKED_CTXSW)
 	p->oncpu = 0;
-
+#endif
 #ifdef CONFIG_PREEMPT
 	/* Want to start with kernel preemption disabled. */
 	task_thread_info(p)->preempt_count = 1;
@@ -1136,7 +1139,7 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 	unsigned long flags;
 	struct rq *rq;
 
-	rq = time_task_grq_lock(p, &flags); ;
+	rq = task_grq_lock(p, &flags); ;
 	parent = p->parent;
 	BUG_ON(p->state != TASK_RUNNING);
 	set_task_cpu(p, task_cpu(parent));
@@ -1151,7 +1154,7 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 		 */
 			resched_task(parent);
 	} else
-		try_preempt(p);
+		try_preempt(p, rq);
 	task_grq_unlock(&flags);
 }
 
@@ -1595,7 +1598,7 @@ static void pc_user_time(struct rq *rq, struct task_struct *p,
 static void
 update_cpu_clock(struct rq *rq, struct task_struct *p, int tick)
 {
-	long time_diff = rq->clock - p->last_ran;
+	long time_diff = rq->clock - rq->rq_last_ran;
 	long account_ns = rq->clock - rq->timekeep_clock;
 	struct task_struct *idle = rq->idle;
 	unsigned long account_pc;
@@ -1637,7 +1640,7 @@ update_cpu_clock(struct rq *rq, struct task_struct *p, int tick)
 	/* time_slice accounting is done in usecs to avoid overflow on 32bit */
 	if (rq->rq_policy != SCHED_FIFO && p != idle)
 		rq->rq_time_slice -= time_diff / 1000;
-	p->last_ran = rq->timekeep_clock = rq->clock;
+	rq->rq_last_ran = rq->timekeep_clock = rq->clock;
 }
 
 /*
@@ -1652,7 +1655,7 @@ static u64 do_task_delta_exec(struct task_struct *p, struct rq *rq)
 
 	if (p == rq->curr) {
 		update_rq_clock(rq);
-		ns = rq->clock - p->last_ran;
+		ns = rq->clock - rq->rq_last_ran;
 		if ((s64)ns < 0)
 			ns = 0;
 	}
@@ -1916,10 +1919,8 @@ static void task_running_tick(struct rq *rq)
 	/* p->time_slice <= 0. We only modify task_struct under grq lock */
 	grq_lock();
 	p = rq->curr;
-	if (likely(task_running(p))) {
-		requeue_task(p);
-		set_tsk_need_resched(p);
-	}
+	requeue_task(p);
+	set_tsk_need_resched(p);
 	grq_unlock();
 }
 
@@ -1942,6 +1943,7 @@ void scheduler_tick(void)
 		task_running_tick(rq);
 	else
 		no_iso_tick();
+	perf_counter_task_tick(rq->curr, cpu);
 }
 
 notrace unsigned long get_parent_ip(unsigned long addr)
@@ -2112,7 +2114,7 @@ out:
 
 /*
  * Print scheduling while atomic bug:
- */
+*/
 static noinline void __schedule_bug(struct task_struct *prev)
 {
 	struct pt_regs *regs = get_irq_regs();
@@ -2159,6 +2161,7 @@ static inline void set_rq_task(struct rq *rq, struct task_struct *p)
 {
 	rq->rq_time_slice = p->time_slice;
 	rq->rq_deadline = p->deadline;
+	rq->rq_last_ran = p->last_ran;
 	rq->rq_policy = p->policy;
 	rq->rq_prio = p->prio;
 }
@@ -2169,13 +2172,14 @@ static inline void set_rq_task(struct rq *rq, struct task_struct *p)
 asmlinkage void __sched __schedule(void)
 {
 	struct task_struct *prev, *next, *idle;
+	unsigned long *switch_count;
 	int deactivate = 0, cpu;
-	long *switch_count;
 	struct rq *rq;
 	u64 now;
 
 	cpu = smp_processor_id();
-	rq = this_rq();
+	rq = cpu_rq(cpu);
+	idle = rq->idle;
 	rcu_qsctr_inc(cpu);
 	prev = rq->curr;
 	switch_count = &prev->nivcsw;
@@ -2184,21 +2188,13 @@ asmlinkage void __sched __schedule(void)
 need_resched_nonpreemptible:
 
 	schedule_debug(prev);
-	idle = rq->idle;
-	/*
-	 * The idle thread is not allowed to schedule!
-	 * Remove this check after it has been exercised a bit.
-	 */
-	if (unlikely(prev == idle) && prev->state != TASK_RUNNING) {
-		printk(KERN_ERR "bad: scheduling from the idle thread!\n");
-		dump_stack();
-	}
 
-	grq_lock_irq();
+	local_irq_disable();
 	update_rq_clock(rq);
 	now = rq->clock;
 	update_cpu_clock(rq, prev, 0);
 
+	grq_lock();
 	clear_tsk_need_resched(prev);
 
 	if (prev->state && !(preempt_count() & PREEMPT_ACTIVE)) {
@@ -2236,15 +2232,14 @@ need_resched_nonpreemptible:
 	prefetch(next);
 	prefetch_stack(next);
 
-	prev->timestamp = prev->last_ran = now;
+	prev->last_ran = now;
 
 	if (likely(prev != next)) {
-		set_rq_task(rq, next);
-
 		sched_info_switch(prev, next);
+		perf_counter_task_sched_out(prev, next, cpu);
+
+		set_rq_task(rq, next);
 		grq.nr_switches++;
-		next->oncpu = 1;
-		prev->oncpu = 0;
 		rq->curr = next;
 		++*switch_count;
 
@@ -2261,6 +2256,7 @@ need_resched_nonpreemptible:
 	if (unlikely(reacquire_kernel_lock(current) < 0))
 		goto need_resched_nonpreemptible;
 }
+EXPORT_SYMBOL(__schedule);
 
 asmlinkage void __sched schedule(void)
 {
@@ -2268,7 +2264,7 @@ need_resched:
 	preempt_disable();
 	__schedule();
 	preempt_enable_no_resched();
-	if (unlikely(test_thread_flag(TIF_NEED_RESCHED)))
+	if (need_resched())
 		goto need_resched;
 }
 EXPORT_SYMBOL(schedule);
@@ -2746,15 +2742,15 @@ void rt_mutex_setprio(struct task_struct *p, int prio)
 	rq = time_task_grq_lock(p, &flags);
 
 	oldprio = p->prio;
-	queued = task_queued_only(p);
+	queued = task_queued_only(p, rq);
 	if (queued)
 		dequeue_task(p);
 	p->prio = prio;
-	if (task_running(p) && prio > oldprio)
+	if (task_running(rq, p) && prio > oldprio)
 		resched_task(p);
 	if (queued) {
 		enqueue_task(p);
-		try_preempt(p);
+		try_preempt(p, rq);
 	}
 
 	task_grq_unlock(&flags);
@@ -2766,7 +2762,7 @@ void rt_mutex_setprio(struct task_struct *p, int prio)
  * Adjust the deadline for when the priority is to change, before it's
  * changed.
  */
-static void adjust_deadline(struct task_struct *p, int new_prio)
+static inline void adjust_deadline(struct task_struct *p, int new_prio)
 {
 	p->deadline += (prio_ratios[USER_PRIO(new_prio)] - pratio(p)) *
 			rr_interval * HZ / 1000 / 100;
@@ -2796,7 +2792,7 @@ void set_user_nice(struct task_struct *p, long nice)
 		p->static_prio = new_static;
 		goto out_unlock;
 	}
-	queued = task_queued_only(p);
+	queued = task_queued_only(p, rq);
 	/*
 	 * If p is actually running, we don't need to do anything when
 	 * changing the priority because the grq is unaffected.
@@ -2810,11 +2806,11 @@ void set_user_nice(struct task_struct *p, long nice)
 
 	if (queued) {
 		enqueue_task(p);
-		try_preempt(p);
+		try_preempt(p, rq);
 	}
 
 	/* Just resched the task, schedule() will know what to do. */
-	if (task_running(p))
+	if (task_running(rq, p))
 		resched_task(p);
 out_unlock:
 	task_grq_unlock(&flags);
@@ -2939,9 +2935,10 @@ static inline struct task_struct *find_process_by_pid(pid_t pid)
 }
 
 /* Actually do priority change: must hold grq lock. */
-static void __setscheduler(struct task_struct *p, int policy, int prio)
+static void
+__setscheduler(struct task_struct *p, struct rq *rq, int policy, int prio)
 {
-	BUG_ON(task_queued_only(p));
+	BUG_ON(task_queued_only(p, rq));
 
 	p->policy = policy;
 	p->rt_priority = prio;
@@ -2952,7 +2949,7 @@ static void __setscheduler(struct task_struct *p, int policy, int prio)
 	 * Reschedule if running. schedule() will know if it can continue
 	 * running or not.
 	 */
-	if (task_running(p))
+	if (task_running(rq, p))
 		resched_task(p);
 }
 
@@ -3084,14 +3081,14 @@ recheck:
 		goto recheck;
 	}
 	update_rq_clock(rq);
-	queued = task_queued_only(p);
+	queued = task_queued_only(p, rq);
 	if (queued)
 		dequeue_task(p);
 	oldprio = p->prio;
-	__setscheduler(p, policy, param->sched_priority);
+	__setscheduler(p, rq, policy, param->sched_priority);
 	if (queued) {
 		enqueue_task(p);
-		try_preempt(p);
+		try_preempt(p, rq);
 	}
 	__task_grq_unlock();
 	spin_unlock_irqrestore(&p->pi_lock, flags);
@@ -3716,20 +3713,20 @@ void __cpuinit init_idle(struct task_struct *idle, int cpu)
 	unsigned long flags;
 
 	time_grq_lock(rq, &flags);
-	idle->timestamp = idle->last_ran = rq->clock;
+	idle->last_ran = rq->clock;
 	idle->state = TASK_RUNNING;
 	/* Setting prio to illegal value shouldn't matter when never queued */
-	idle->prio = rq->rq_prio = PRIO_LIMIT;
-	rq->rq_deadline = idle->deadline;
-	rq->rq_policy = idle->policy;
-	rq->rq_time_slice = idle->time_slice;
+	idle->prio = PRIO_LIMIT;
+	set_rq_task(rq, idle);
 	idle->cpus_allowed = cpumask_of_cpu(cpu);
 	set_task_cpu(idle, cpu);
 	rq->curr = rq->idle = idle;
-	idle->oncpu = 1;
 	set_cpuidle_map(cpu);
 #ifdef CONFIG_HOTPLUG_CPU
 	idle->unplugged_mask = CPU_MASK_NONE;
+#endif
+#if defined(CONFIG_SMP) && defined(__ARCH_WANT_UNLOCKED_CTXSW)
+	idle->oncpu = 1;
 #endif
 	grq_unlock_irqrestore(&flags);
 
@@ -3909,16 +3906,15 @@ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 		goto out;
 	}
 
-	queued = task_queued_only(p);
+	queued = task_queued_only(p, rq);
 
 	cpumask_copy(&p->cpus_allowed, new_mask);
-	p->rt_nr_cpus_allowed = cpumask_weight(new_mask);
 
 	/* Can the task run on the task's current CPU? If so, we're done */
 	if (cpumask_test_cpu(task_cpu(p), new_mask))
 		goto out;
 
-	if (task_running(p)) {
+	if (task_running(rq, p)) {
 		/* Task is running on the wrong cpu now, reschedule it. */
 		set_tsk_need_resched(p);
 		running_wrong = 1;
@@ -3927,7 +3923,7 @@ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 
 out:
 	if (queued)
-		try_preempt(p);
+		try_preempt(p, rq);
 	task_grq_unlock(&flags);
 
 	if (running_wrong)
@@ -3958,7 +3954,7 @@ void sched_idle_next(void)
 	 */
 	time_grq_lock(rq, &flags);
 
-	__setscheduler(idle, SCHED_FIFO, MAX_RT_PRIO - 1);
+	__setscheduler(idle, rq, SCHED_FIFO, MAX_RT_PRIO - 1);
 
 	activate_idle_task(idle);
 	set_tsk_need_resched(rq->curr);
@@ -4188,8 +4184,6 @@ static void remove_cpu(unsigned long cpu)
 		if (cpus_empty(cpus_remaining)) {
 			cpumask_copy(&p->unplugged_mask, &p->cpus_allowed);
 			cpumask_copy(&p->cpus_allowed, &cpu_possible_map);
-			p->rt_nr_cpus_allowed =
-				cpumask_weight(&cpu_possible_map);
 		}
 	} while_each_thread(t, p);
 
@@ -4222,8 +4216,6 @@ static void add_cpu(unsigned long cpu)
 				 * set all the cpus back.
 				 */
 				cpumask_copy(&p->cpus_allowed, &p->unplugged_mask);
-				p->rt_nr_cpus_allowed =
-					cpumask_weight(&p->cpus_allowed);
 				cpus_clear(p->unplugged_mask);
 			}
 		}
@@ -4283,7 +4275,7 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		remove_cpu(cpu);
 		return_task(idle, 1);
 		idle->static_prio = MAX_PRIO;
-		__setscheduler(idle, SCHED_NORMAL, 0);
+		__setscheduler(idle, rq, SCHED_NORMAL, 0);
 		idle->prio = PRIO_LIMIT;
 		set_rq_task(rq, idle);
 		update_rq_clock(rq);
@@ -5833,7 +5825,7 @@ int in_sched_functions(unsigned long addr)
 		&& addr < (unsigned long)__sched_text_end);
 }
 
-void __init sched_init(void)
+void sched_init(void)
 {
 	int i;
 	int highest_cpu = 0;
@@ -5969,13 +5961,13 @@ void normalize_rt_tasks(void)
 		rq = __task_grq_lock(p);
 		update_rq_clock(rq);
 
-		queued = task_queued_only(p);
+		queued = task_queued_only(p, rq);
 		if (queued)
 			dequeue_task(p);
-		__setscheduler(p, SCHED_NORMAL, 0);
+		__setscheduler(p, rq, SCHED_NORMAL, 0);
 		if (queued) {
 			enqueue_task(p);
-			try_preempt(p);
+			try_preempt(p, rq);
 		}
 
 		__task_grq_unlock();

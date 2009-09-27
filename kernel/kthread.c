@@ -167,9 +167,7 @@ void kthread_bind(struct task_struct *k, unsigned int cpu)
 	}
 	set_task_cpu(k, cpu);
 	k->cpus_allowed = cpumask_of_cpu(cpu);
-#ifdef CONFIG_CPU_BFS
-	k->rt_nr_cpus_allowed = 1;
-#else
+#ifdef CONFIG_CPU_CFS
 	k->rt.nr_cpus_allowed = 1;
 #endif
 	k->flags |= PF_THREAD_BOUND;
