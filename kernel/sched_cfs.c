@@ -3056,7 +3056,7 @@ int can_migrate_task(struct task_struct *p, struct rq *rq, int this_cpu,
 
 	if (tsk_cache_hot) {
 		schedstat_inc(p, se.nr_failed_migrations_hot);
-		return 0;
+		return 1;
 	}
 	return 1;
 }
