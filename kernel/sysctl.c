@@ -109,12 +109,12 @@ static int __maybe_unused one = 1;
 #endif
 static int __maybe_unused two = 2;
 static unsigned long one_ul = 1;
-#ifdef CONFIG_CPU_CFS
-static int one_hundred = 100;
-#else
+#ifdef CONFIG_CPU_BFS
 static int __read_mostly one = 1;
 static int __read_mostly one_hundred = 100;
 static int __read_mostly five_thousand = 5000;
+#else
+static int one_hundred = 100;
 #endif
 
 /* this is needed for the proc_doulongvec_minmax of vm_dirty_bytes */
@@ -250,7 +250,7 @@ static struct ctl_table root_table[] = {
 	{ .ctl_name = 0 }
 };
 
-#if defined(CONFIG_CPU_CFS) && defined(CONFIG_SCHED_DEBUG)
+#if defined(CONFIG_SCHED_DEBUG) && defined(CONFIG_CPU_CFS)
 static int min_sched_granularity_ns = 100000;		/* 100 usecs */
 static int max_sched_granularity_ns = NSEC_PER_SEC;	/* 1 second */
 static int min_wakeup_granularity_ns;			/* 0 usecs */
@@ -259,15 +259,16 @@ static int max_wakeup_granularity_ns = NSEC_PER_SEC;	/* 1 second */
 
 static struct ctl_table kern_table[] = {
 #ifdef CONFIG_CPU_CFS
-        {
-                .ctl_name       = CTL_UNNUMBERED,
-                .procname       = "sched_child_runs_first",
-                .data           = &sysctl_sched_child_runs_first,
-                .maxlen         = sizeof(unsigned int),
-                .mode           = 0644,
-                .proc_handler   = &proc_dointvec,
-        },
-#ifdef CONFIG_SCHED_DEBUG
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "sched_child_runs_first",
+		.data		= &sysctl_sched_child_runs_first,
+		.maxlen		= sizeof(unsigned int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+#endif
+#if defined(CONFIG_SCHED_DEBUG) && defined(CONFIG_CPU_CFS)
 	{
 		.ctl_name	= CTL_UNNUMBERED,
 		.procname	= "sched_min_granularity_ns",
@@ -363,6 +364,7 @@ static struct ctl_table kern_table[] = {
 		.extra2		= &one,
 	},
 #endif
+#ifdef CONFIG_CPU_CFS
 	{
 		.ctl_name	= CTL_UNNUMBERED,
 		.procname	= "sched_rt_period_us",
@@ -821,7 +823,7 @@ static struct ctl_table kern_table[] = {
 	},
 #endif
 #if defined(CONFIG_CPU_BFS)
-	{
+{
 		.ctl_name	= CTL_UNNUMBERED,
 		.procname	= "rr_interval",
 		.data		= &rr_interval,

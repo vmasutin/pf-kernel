@@ -97,20 +97,19 @@
 #define USER_PRIO(p)		((p)-MAX_RT_PRIO)
 #define TASK_USER_PRIO(p)	USER_PRIO((p)->static_prio)
 #define MAX_USER_PRIO		(USER_PRIO(MAX_PRIO))
-
 #ifdef CONFIG_CPU_BFS
-#define SCHED_PRIO(p)		((p)+MAX_RT_PRIO)
+# define SCHED_PRIO(p)		((p)+MAX_RT_PRIO)
 #endif
 
 /*
  * Helpers for converting nanosecond timing to jiffy resolution
  */
 #ifdef CONFIG_CPU_BFS
-#define JIFFIES_TO_NS(TIME)	((TIME) * (1000000000 / HZ))
-#define MS_TO_NS(TIME)		((TIME) * 1000000)
-#define MS_TO_US(TIME)		((TIME) * 1000)
+# define JIFFIES_TO_NS(TIME)	((TIME) * (1000000000 / HZ))
+# define MS_TO_NS(TIME)		((TIME) * 1000000)
+# define MS_TO_US(TIME)		((TIME) * 1000)
 #else
-#define NS_TO_JIFFIES(TIME)	((unsigned long)(TIME) / (NSEC_PER_SEC / HZ))
+# define NS_TO_JIFFIES(TIME)	((unsigned long)(TIME) / (NSEC_PER_SEC / HZ))
 #endif
 
 #define NICE_0_LOAD		SCHED_LOAD_SCALE
@@ -129,10 +128,7 @@
  */
 #define RUNTIME_INF	((u64)~0ULL)
 
-/*
- * Implement selected CPU scheduler
- */
-
+/* From here include the selected scheduler */
 #ifdef CONFIG_CPU_BFS
 #include "sched_bfs.c"
 #else

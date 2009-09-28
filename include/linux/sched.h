@@ -37,17 +37,15 @@
 #define SCHED_RR		2
 #define SCHED_BATCH		3
 #ifdef CONFIG_CPU_BFS
-#define SCHED_ISO		4
-#endif
-#define SCHED_IDLE		5
+# define SCHED_ISO		4
+# define SCHED_IDLEPRIO		5
 
-#ifdef CONFIG_CPU_BFS
-# define SCHED_IDLEPRIO		(SCHED_IDLE)
 # define SCHED_MAX		(SCHED_IDLEPRIO)
 # define SCHED_RANGE(policy)	((policy) <= SCHED_MAX)
 #else
+# define SCHED_IDLE		5
 /* Can be ORed in to make sure the process is reverted back to SCHED_NORMAL on fork */
-# define SCHED_RESET_ON_FORK     0x40000000
+# define SCHED_RESET_ON_FORK	0x40000000
 #endif
 
 #ifdef __KERNEL__
@@ -1204,7 +1202,6 @@ struct sched_rt_entity {
 	struct rt_rq		*my_q;
 #endif
 };
-
 #endif /* CONFIG_CPU_CFS */
 
 struct task_struct {
@@ -1216,21 +1213,22 @@ struct task_struct {
 
 	int lock_depth;		/* BKL lock depth */
 
-#if defined(CONFIG_SMP) && defined(__ARCH_WANT_UNLOCKED_CTXSW) && defined(CONFIG_CPU_CFS)
-        int oncpu;
-#elif defined(CONFIG_CPU_BFS)
+#ifdef CONFIG_CPU_CFS
+#ifdef CONFIG_SMP
+#ifdef __ARCH_WANT_UNLOCKED_CTXSW
 	int oncpu;
 #endif
-
+#endif
+#else
+	int oncpu;
+#endif
+	int prio, static_prio, normal_prio;
 #ifdef CONFIG_CPU_BFS
 	int time_slice, first_time_slice;
 	unsigned long deadline;
 	struct list_head run_list;
 #endif
-
-	int prio, static_prio, normal_prio;
 	unsigned int rt_priority;
-
 #ifdef CONFIG_CPU_BFS
 	u64 last_ran;
 	u64 sched_time; /* sched_clock time spent running */
@@ -1263,7 +1261,7 @@ struct task_struct {
 
 	unsigned int policy;
 	cpumask_t cpus_allowed;
-#ifdef CONFIG_HOTPLUG_CPU
+#if defined(CONFIG_CPU_BFS) && defined(CONFIG_HOTPLUG_CPU)
 	cpumask_t unplugged_mask;
 #endif
 
@@ -1291,7 +1289,8 @@ struct task_struct {
 	unsigned did_exec:1;
 	unsigned in_execve:1;	/* Tell the LSMs that the process is doing an
 				 * execve */
-        unsigned in_iowait:1;
+	unsigned in_iowait:1;
+
 
 #ifdef CONFIG_CPU_CFS
 	/* Revert to default priority/policy when forking */
@@ -1570,21 +1569,21 @@ struct task_struct {
  * priority to a value higher than any user task. Note:
  * MAX_RT_PRIO must not be smaller than MAX_USER_RT_PRIO.
  */
-
+#ifdef CONFIG_CPU_BFS
+# define PRIO_RANGE		(40)
+#endif
 #define MAX_USER_RT_PRIO	100
 #define MAX_RT_PRIO		MAX_USER_RT_PRIO
 
 #ifdef CONFIG_CPU_BFS
-# define PRIO_RANGE		(40)
 # define MAX_PRIO		(MAX_RT_PRIO + PRIO_RANGE)
-# define ISO_PRIO               (MAX_RT_PRIO)
-# define NORMAL_PRIO            (MAX_RT_PRIO + 1)
-# define IDLE_PRIO              (MAX_RT_PRIO + 2)
-# define PRIO_LIMIT		((NORMAL_PRIO) + 1)
+# define ISO_PRIO		(MAX_RT_PRIO)
+# define NORMAL_PRIO		(MAX_RT_PRIO + 1)
+# define IDLE_PRIO		(MAX_RT_PRIO + 2)
+# define PRIO_LIMIT		((IDLE_PRIO) + 1)
 #else
 # define MAX_PRIO		(MAX_RT_PRIO + 40)
 #endif
-
 #define DEFAULT_PRIO		(MAX_RT_PRIO + 20)
 
 static inline int rt_prio(int prio)
@@ -1867,8 +1866,9 @@ extern unsigned long long
 task_sched_runtime(struct task_struct *task);
 extern unsigned long long thread_group_sched_runtime(struct task_struct *task);
 
+
 /* sched_exec is called by processes performing an exec */
-#if defined(CONFIG_CPU_CFS) && defined(CONFIG_SMP)
+#if defined(CONFIG_SMP) && defined(CONFIG_CPU_CFS)
 extern void sched_exec(void);
 #else
 #define sched_exec()   {}

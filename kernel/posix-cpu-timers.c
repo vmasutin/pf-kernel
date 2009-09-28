@@ -254,7 +254,6 @@ void thread_group_cputime(struct task_struct *tsk, struct task_cputime *times)
 #else
 		times->sum_exec_runtime += t->se.sum_exec_runtime;
 #endif
-
 		t = next_thread(t);
 	} while (t != tsk);
 
@@ -525,7 +524,6 @@ void posix_cpu_timers_exit(struct task_struct *tsk)
 #else
 		       tsk->utime, tsk->stime, tsk->se.sum_exec_runtime);
 #endif
-
 }
 void posix_cpu_timers_exit_group(struct task_struct *tsk)
 {

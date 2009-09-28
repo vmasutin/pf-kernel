@@ -634,7 +634,7 @@ __mod_timer(struct timer_list *timer, unsigned long expires,
 
 	cpu = smp_processor_id();
 
-#if defined(CONFIG_CPU_CFS) && defined(CONFIG_NO_HZ) && defined(CONFIG_SMP)
+#if defined(CONFIG_NO_HZ) && defined(CONFIG_SMP)
 	if (!pinned && get_sysctl_timer_migration() && idle_cpu(cpu)) {
 		int preferred_cpu = get_nohz_load_balancer();
 
@@ -1154,8 +1154,10 @@ void update_process_times(int user_tick)
 	int cpu = smp_processor_id();
 
 #ifdef CONFIG_CPU_CFS
-	/* Note: this timer irq context must be accounted for as well. */
-	/* applies only to CFS, because accounting is done within sched_bfs.c */
+	/* 
+	 * Note: this timer irq context must be accounted for as well. 
+	 * Accounting is done within BFS
+	 */
 	account_process_tick(p, user_tick);
 #endif
 	run_local_timers();

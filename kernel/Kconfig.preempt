@@ -1,8 +1,7 @@
 
 choice
 	prompt "Preemption Model"
-	default PREEMPT_NONE if CPU_CFS
-	default PREEMPT if CPU_BFS
+	default PREEMPT
 
 config PREEMPT_NONE
 	bool "No Forced Preemption (Server)"
@@ -19,7 +18,7 @@ config PREEMPT_NONE
 
 config PREEMPT_VOLUNTARY
 	bool "Voluntary Kernel Preemption (Desktop)"
-	depends on !CPU_BFS
+	depends on CPU_CFS
 	help
 	  This option reduces the latency of the kernel by adding more
 	  "explicit preemption points" to the kernel code. These new
