@@ -4219,7 +4219,9 @@ static void add_cpu(unsigned long cpu)
 static int __cpuinit
 migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 {
+#ifdef CONFIG_HOTPLUG_CPU
 	struct task_struct *idle;
+#endif
 	int cpu = (long)hcpu;
 	unsigned long flags;
 	struct rq *rq;

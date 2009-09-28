@@ -1216,10 +1216,10 @@ struct task_struct {
 
 	int lock_depth;		/* BKL lock depth */
 
-#ifdef CONFIG_SMP
-#ifdef __ARCH_WANT_UNLOCKED_CTXSW
+#if defined(CONFIG_SMP) && defined(__ARCH_WANT_UNLOCKED_CTXSW) && defined(CONFIG_CPU_CFS)
         int oncpu;
-#endif
+#elif defined(CONFIG_CPU_BFS)
+	int oncpu;
 #endif
 
 #ifdef CONFIG_CPU_BFS
