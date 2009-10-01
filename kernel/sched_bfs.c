@@ -18,9 +18,9 @@
 /*
  * This is the time all tasks within the same priority round robin.
  * Value is in ms and set to a minimum of 6ms. Scales with number of cpus.
- * Tunable via /proc interface. (set to 1000 on boot, back to 6 on init)
+ * Tunable via /proc interface.
  */
-int rr_interval __read_mostly = 1000;
+int rr_interval __read_mostly = 6;
 
 /*
  * sched_iso_cpu - sysctl which determines the cpu percentage SCHED_ISO tasks
@@ -5795,6 +5795,13 @@ void __init sched_init_smp(void)
 	free_cpumask_var(non_isolated_cpus);
 
 	alloc_cpumask_var(&fallback_doms, GFP_KERNEL);
+
+	/*
+	 * Assume that every added cpu gives us slightly less overall latency
+	 * allowing us to increase the base rr_interval, but in a non linear
+	 * fashion.
+	 */
+	rr_interval *= 1 + ilog2(num_online_cpus());
 }
 #else
 void __init sched_init_smp(void)
