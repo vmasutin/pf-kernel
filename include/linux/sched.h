@@ -2,6 +2,13 @@
 #define _LINUX_SCHED_H
 
 /*
+ * ZenSched: define BFS_VERSION
+ */
+#ifdef CONFIG_CPU_BFS
+# define BFS_VERSION    "v240"
+#endif
+
+/*
  * cloning flags:
  */
 #define CSIGNAL		0x000000ff	/* signal mask to be sent at exit */
