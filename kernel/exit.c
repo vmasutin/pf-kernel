@@ -214,6 +214,9 @@ repeat:
 			leader->exit_state = EXIT_DEAD;
 	}
 
+#ifdef CONFIG_CPU_BFS
+	sched_exit(p);
+#endif
 	write_unlock_irq(&tasklist_lock);
 	release_thread(p);
 	call_rcu(&p->rcu, delayed_put_task_struct);

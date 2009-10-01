@@ -5,7 +5,7 @@
  * ZenSched: define BFS_VERSION
  */
 #ifdef CONFIG_CPU_BFS
-# define BFS_VERSION    "v240"
+# define BFS_VERSION    "v300"
 #endif
 
 /*
@@ -2032,6 +2032,9 @@ extern void wake_up_new_task(struct task_struct *tsk,
  static inline void kick_process(struct task_struct *tsk) { }
 #endif
 extern void sched_fork(struct task_struct *p, int clone_flags);
+#ifdef CONFIG_CPU_BFS
+extern void sched_exit(struct task_struct *p);
+#endif
 extern void sched_dead(struct task_struct *p);
 
 extern void proc_caches_init(void);
