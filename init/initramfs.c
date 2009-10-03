@@ -238,6 +238,10 @@ static int __init do_header(void)
 	parse_header(collected);
 	next_header = this_header + N_ALIGN(name_len) + body_len;
 	next_header = (next_header + 3) & ~3;
+	if (file_looked_for) {
+		read_into(name_buf, N_ALIGN(name_len), GotName);
+		return 0;
+	}
 	state = SkipIt;
 	if (name_len <= 0 || name_len > PATH_MAX)
 		return 0;
@@ -332,7 +336,7 @@ static int __init do_copy_mem(void)
 	if (count >= body_len) {
 		memcpy(file_current, victim, body_len);
 		eat(body_len);
-		file_looked_for = NULL; /* don't find files with same name */
+		file_looked_for = ""; /* don't find files with same name */
 		state = SkipIt;
 		return 0;
 	} else {
@@ -344,7 +348,7 @@ static int __init do_copy_mem(void)
 	}
 }
 #else
-static inline int is_file_looked_for(char *filename) {return 0;}
+static inline int is_file_looked_for(const char *filename) {return 0;}
 #define do_copy_mem NULL /* because it is used as a pointer */
 #endif
 
@@ -358,6 +362,8 @@ static int __init do_name(void)
 	}
 	if (is_file_looked_for(file_looked_for))
 		state = CopyFileMem;
+	if (file_looked_for)
+		return 0;
 	clean_path(collected, mode);
 	if (S_ISREG(mode)) {
 		int ml = maybe_link();
@@ -483,8 +489,17 @@ static char * __init unpack_to_rootfs(char *buf, unsigned len)
 	symlink_buf = kmalloc(PATH_MAX + N_ALIGN(PATH_MAX) + 1, GFP_KERNEL);
 	name_buf = kmalloc(N_ALIGN(PATH_MAX), GFP_KERNEL);
 
-	if (!header_buf || !symlink_buf || !name_buf)
-		panic("can't allocate buffers");
+	if (!header_buf || !symlink_buf || !name_buf) {
+		//panic("can't allocate buffers");
+		error("can't allocate buffers");
+		return message;
+	}
+
+//	if (file_looked_for) {
+//		error("coucou2");
+//		return message;
+//	}
+
 
 	state = Start;
 	this_header = 0;
