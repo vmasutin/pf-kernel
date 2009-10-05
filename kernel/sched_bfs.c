@@ -295,11 +295,19 @@ static inline int cpu_of(struct rq *rq)
 #define for_each_domain(cpu, __sd) \
 	for (__sd = rcu_dereference(cpu_rq(cpu)->sd); __sd; __sd = __sd->parent)
 
+#ifdef CONFIG_SMP
 #define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
 #define this_rq()		(&__get_cpu_var(runqueues))
 #define task_rq(p)		cpu_rq(task_cpu(p))
 #define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
 #define raw_rq()		(&__raw_get_cpu_var(runqueues))
+#else /* CONFIG_SMP */
+static struct rq *uprq;
+#define cpu_rq(cpu)   (uprq)
+#define this_rq()     (uprq)
+#define task_rq(p)    (uprq)
+#define cpu_curr(cpu) ((uprq)->curr)
+#endif
 
 #include "sched_stats.h"
 
@@ -922,11 +930,14 @@ unsigned long wait_task_inactive(struct task_struct *p, long match_state)
 		 * work out! In the unlikely event rq is dereferenced
 		 * since we're lockless, grab it again.
 		 */
+#ifdef CONFIG_SMP
 retry_rq:
 		rq = task_rq(p);
 		if (unlikely(!rq))
 			goto retry_rq;
-
+#else /* CONFIG_SMP */
+		rq = task_rq(p);
+#endif
 		/*
 		 * If the task is actively running on another CPU
 		 * still, just relax and busy-wait without holding
@@ -1060,20 +1071,27 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 		offset_deadline = -cache_distance(this_rq, rq, p);
 		if (rq_prio != PRIO_LIMIT)
 			offset_deadline += rq->rq_deadline;
+		else
+			if (rq == this_rq) {
+				/* this_rq is idle, use that over everything */
+				highest_prio_rq = rq;
+				goto out;
+			}
 
-		if (rq_prio > highest_prio || (rq_prio == highest_prio &&
+		if (rq_prio > highest_prio ||
 		    (time_after(offset_deadline, latest_deadline) ||
-		    (this_rq == rq && offset_deadline == latest_deadline)))) {
+		    (offset_deadline == latest_deadline && this_rq == rq))) {
 			latest_deadline = offset_deadline;
 			highest_prio = rq_prio;
 			highest_prio_rq = rq;
 		}
 	}
 
-	if (p->prio > highest_prio || (p->policy == SCHED_NORMAL &&
-	    p->prio == highest_prio && !time_before(p->deadline, latest_deadline)))
+	if (p->prio > highest_prio || (p->prio == highest_prio &&
+	    p->policy == SCHED_NORMAL && !time_before(p->deadline, latest_deadline)))
 	    	return;
 
+out:
 	/* p gets to preempt highest_prio_rq->curr */
 	resched_task(highest_prio_rq->curr);
 	return;
@@ -1258,17 +1276,18 @@ void wake_up_new_task(struct task_struct *p, unsigned long clone_flags)
 	rq = task_grq_lock(p, &flags); ;
 	parent = p->parent;
 	BUG_ON(p->state != TASK_RUNNING);
+	/* Unnecessary but small chance that the parent changed cpus */
 	set_task_cpu(p, task_cpu(parent));
 	activate_task(p, rq);
 	trace_sched_wakeup_new(rq, p, 1);
 	if (!(clone_flags & CLONE_VM) && rq->curr == parent &&
-		!suitable_idle_cpus(p)) {
+	    !suitable_idle_cpus(p)) {
 		/*
 		 * The VM isn't cloned, so we're in a good position to
 		 * do child-runs-first in anticipation of an exec. This
 		 * usually avoids a lot of COW overhead.
 		 */
-			resched_task(parent);
+		resched_task(parent);
 	} else
 		try_preempt(p, rq);
 	task_grq_unlock(&flags);
@@ -1293,10 +1312,10 @@ void sched_exit(struct task_struct *p)
 		int *par_tslice, *p_tslice;
 
 		parent = p->parent;
-		rq = task_grq_lock(parent, &flags);
 		par_tslice = &parent->time_slice;
 		p_tslice = &p->time_slice;
 
+		rq = task_grq_lock(parent, &flags);
 		/* The real time_slice of the "curr" task is on the rq var.*/
 		if (p == rq->curr)
 			p_tslice = &rq->rq_time_slice;
@@ -1533,7 +1552,7 @@ unsigned long nr_running(void)
 
 unsigned long nr_uninterruptible(void)
 {
-	unsigned long nu = grq.nr_uninterruptible;
+	long nu = grq.nr_uninterruptible;
 
 	if (unlikely(nu < 0))
 		nu = 0;
@@ -1776,7 +1795,7 @@ update_cpu_clock(struct rq *rq, struct task_struct *p, int tick)
  * Return any ns on the sched_clock that have not yet been accounted in
  * @p in case that task is currently running.
  *
- * Called with task_grq_lock() held on @rq.
+ * Called with task_grq_lock() held.
  */
 static u64 do_task_delta_exec(struct task_struct *p, struct rq *rq)
 {
@@ -6067,6 +6086,8 @@ void __init sched_init(void)
 	spin_lock_init(&grq.lock);
 #ifdef CONFIG_SMP
 	init_defrootdomain();
+#else
+	uprq = &per_cpu(runqueues, 0);
 #endif
 	for_each_possible_cpu(i) {
 		rq = cpu_rq(i);
