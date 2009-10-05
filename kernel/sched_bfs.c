@@ -282,6 +282,7 @@ static struct rq *uprq;
 #define this_rq()     (uprq)
 #define task_rq(p)    (uprq)
 #define cpu_curr(cpu) ((uprq)->curr)
+#define raw_rq()      (uprq)
 #endif
 
 #include "sched_stats.h"
