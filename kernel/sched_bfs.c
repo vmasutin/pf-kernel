@@ -65,7 +65,6 @@
 #include <linux/tsacct_kern.h>
 #include <linux/kprobes.h>
 #include <linux/delayacct.h>
-#include <linux/reciprocal_div.h>
 #include <linux/log2.h>
 #include <linux/bootmem.h>
 #include <linux/ftrace.h>
