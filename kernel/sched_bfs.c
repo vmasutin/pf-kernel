@@ -32,7 +32,7 @@
 #include <linux/module.h>
 #include <linux/nmi.h>
 #include <linux/init.h>
-#include <linux/uaccess.h>
+#include <asm/uaccess.h>
 #include <linux/highmem.h>
 #include <linux/smp_lock.h>
 #include <asm/mmu_context.h>
@@ -49,38 +49,44 @@
 #include <linux/vmalloc.h>
 #include <linux/blkdev.h>
 #include <linux/delay.h>
-#include <linux/pid_namespace.h>
 #include <linux/smp.h>
 #include <linux/threads.h>
 #include <linux/timer.h>
 #include <linux/rcupdate.h>
 #include <linux/cpu.h>
 #include <linux/cpuset.h>
+#include <linux/cpumask.h>
 #include <linux/percpu.h>
 #include <linux/kthread.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
-#include <linux/sysctl.h>
 #include <linux/syscalls.h>
 #include <linux/times.h>
 #include <linux/tsacct_kern.h>
 #include <linux/kprobes.h>
 #include <linux/delayacct.h>
-#include <linux/unistd.h>
-#include <linux/pagemap.h>
-#include <linux/hrtimer.h>
-#include <linux/tick.h>
-#include <linux/debugfs.h>
-#include <linux/ctype.h>
+#include <linux/reciprocal_div.h>
+#include <linux/log2.h>
+#include <linux/bootmem.h>
 #include <linux/ftrace.h>
 
 #include <asm/tlb.h>
-#include <asm/irq_regs.h>
-
-#include "sched_cpupri.h"
+#include <asm/unistd.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
+
+#define rt_prio(prio)		unlikely((prio) < MAX_RT_PRIO)
+#define rt_task(p)		rt_prio((p)->prio)
+#define rt_queue(rq)		rt_prio((rq)->rq_prio)
+#define batch_task(p)		(unlikely((p)->policy == SCHED_BATCH))
+#define is_rt_policy(policy)	((policy) == SCHED_FIFO || \
+					(policy) == SCHED_RR)
+#define has_rt_policy(p)	unlikely(is_rt_policy((p)->policy))
+#define idleprio_task(p)	unlikely((p)->policy == SCHED_IDLEPRIO)
+#define iso_task(p)		unlikely((p)->policy == SCHED_ISO)
+#define iso_queue(rq)		unlikely((rq)->rq_policy == SCHED_ISO)
+#define ISO_PERIOD		((5 * HZ * num_online_cpus()) + 1)
 
 /*
  * Convert user-nice values [ -20 ... 0 ... 19 ]
@@ -101,40 +107,10 @@
 #define MAX_USER_PRIO		(USER_PRIO(MAX_PRIO))
 #define SCHED_PRIO(p)		((p)+MAX_RT_PRIO)
 
-/*
- * Helpers for converting nanosecond timing to jiffy resolution
- */
+/* Some helpers for converting to/from various scales.*/
 #define JIFFIES_TO_NS(TIME)	((TIME) * (1000000000 / HZ))
 #define MS_TO_NS(TIME)		((TIME) * 1000000)
 #define MS_TO_US(TIME)		((TIME) * 1000)
-
-#define NICE_0_LOAD		SCHED_LOAD_SCALE
-#define NICE_0_SHIFT		SCHED_LOAD_SHIFT
-
-/*
- * These are the 'tuning knobs' of the scheduler:
- *
- * default timeslice is 100 msecs (used only for SCHED_RR tasks).
- * Timeslices get refilled after they expire.
- */
-#define DEF_TIMESLICE		(100 * HZ / 1000)
-
-/*
- * single value that denotes runtime == period, ie unlimited time.
- */
-#define RUNTIME_INF	((u64)~0ULL)
-
-#define rt_prio(prio)		unlikely((prio) < MAX_RT_PRIO)
-#define rt_task(p)		rt_prio((p)->prio)
-#define rt_queue(rq)		rt_prio((rq)->rq_prio)
-#define batch_task(p)		(unlikely((p)->policy == SCHED_BATCH))
-#define is_rt_policy(policy)	((policy) == SCHED_FIFO || \
-					(policy) == SCHED_RR)
-#define has_rt_policy(p)	unlikely(is_rt_policy((p)->policy))
-#define idleprio_task(p)	unlikely((p)->policy == SCHED_IDLEPRIO)
-#define iso_task(p)		unlikely((p)->policy == SCHED_ISO)
-#define iso_queue(rq)		unlikely((rq)->rq_policy == SCHED_ISO)
-#define ISO_PERIOD		((5 * HZ * num_online_cpus()) + 1)
 
 /*
  * This is the time all tasks within the same priority round robin.
