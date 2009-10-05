@@ -1,6 +1,6 @@
 choice
 	prompt "ZenSched CPU Scheduler Choice"
-	default CPU_CFS
+	default CPU_BFS # WHAT!!!!!!!
 	help
 	  Here you can choose the CPU scheduler to be compiled with the kernel.
 
