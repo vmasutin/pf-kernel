@@ -323,4 +323,4 @@ static int __init acpi_debug_init(void)
 }
 
 subsys_initcall(acpi_debug_init);
-#endif
+
