@@ -258,16 +258,6 @@ static int max_wakeup_granularity_ns = NSEC_PER_SEC;	/* 1 second */
 #endif
 
 static struct ctl_table kern_table[] = {
-#ifdef CONFIG_CPU_CFS
-	{
-		.ctl_name	= CTL_UNNUMBERED,
-		.procname	= "sched_child_runs_first",
-		.data		= &sysctl_sched_child_runs_first,
-		.maxlen		= sizeof(unsigned int),
-		.mode		= 0644,
-		.proc_handler	= &proc_dointvec,
-	},
-#endif
 #if defined(CONFIG_SCHED_DEBUG) && defined(CONFIG_CPU_CFS)
 	{
 		.ctl_name	= CTL_UNNUMBERED,

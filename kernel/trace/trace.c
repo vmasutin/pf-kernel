@@ -274,24 +274,12 @@ unsigned long trace_flags = TRACE_ITER_PRINT_PARENT | TRACE_ITER_PRINTK |
  */
 void trace_wake_up(void)
 {
-#ifdef CONFIG_CPU_CFS
-	int cpu;
-
-	if (trace_flags & TRACE_ITER_BLOCK)
-		return;
 	/*
-	 * The (g)runqueue_is_locked() can fail, but this is the best we
+	 * The runqueue_is_locked() can fail, but this is the best we
 	 * have for now:
 	 */
-	cpu = get_cpu();
-	if (!runqueue_is_locked(cpu))
-#else
-	if (!(trace_flags & TRACE_ITER_BLOCK) && !grunqueue_is_locked())
-#endif
+	if (!(trace_flags & TRACE_ITER_BLOCK) && !runqueue_is_locked())
 		wake_up(&trace_wait);
-#ifdef CONFIG_CPU_CFS
-	put_cpu();
-#endif
 }
 
 static int __init set_buf_size(char *str)

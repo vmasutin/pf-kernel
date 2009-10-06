@@ -46,13 +46,10 @@
 #ifdef CONFIG_CPU_BFS
 # define SCHED_ISO		4
 # define SCHED_IDLEPRIO		5
-
 # define SCHED_MAX		(SCHED_IDLEPRIO)
 # define SCHED_RANGE(policy)	((policy) <= SCHED_MAX)
 #else
 # define SCHED_IDLE		5
-/* Can be ORed in to make sure the process is reverted back to SCHED_NORMAL on fork */
-# define SCHED_RESET_ON_FORK	0x40000000
 #endif
 
 #ifdef __KERNEL__
@@ -185,7 +182,7 @@ print_cfs_rq(struct seq_file *m, int cpu, struct cfs_rq *cfs_rq)
 {
 }
 #endif
-#endif
+#endif /* CONFIG_SCHED_DEBUG */
 
 extern unsigned long long time_sync_thresh;
 
@@ -210,9 +207,6 @@ extern unsigned long long time_sync_thresh;
 /* in tsk->state again */
 #define TASK_DEAD		64
 #define TASK_WAKEKILL		128
-#ifdef CONFIG_CPU_CFS
-#define TASK_WAKING		256
-#endif
 
 /* Convenience macros for the sake of set_task_state */
 #define TASK_KILLABLE		(TASK_WAKEKILL | TASK_UNINTERRUPTIBLE)
@@ -283,7 +277,7 @@ extern void init_idle_bootup_task(struct task_struct *idle);
 extern int grunqueue_is_locked(void);
 extern void grq_unlock_wait(void);
 #else
-extern int runqueue_is_locked(int cpu);
+extern int runqueue_is_locked(void);
 extern void task_rq_unlock_wait(struct task_struct *p);
 #endif
 
@@ -826,19 +820,18 @@ enum cpu_idle_type {
 #define SCHED_LOAD_SCALE_FUZZ	SCHED_LOAD_SCALE
 
 #ifdef CONFIG_SMP
-#define SD_LOAD_BALANCE		0x0001	/* Do load balancing on this domain. */
-#define SD_BALANCE_NEWIDLE	0x0002	/* Balance when about to become idle */
-#define SD_BALANCE_EXEC		0x0004	/* Balance on exec */
-#define SD_BALANCE_FORK		0x0008	/* Balance on fork, clone */
-#define SD_BALANCE_WAKE		0x0010  /* Balance on wakeup */
-#define SD_WAKE_AFFINE		0x0020	/* Wake task to waking CPU */
-#define SD_PREFER_LOCAL		0x0040  /* Prefer to keep tasks local to this domain */
-#define SD_SHARE_CPUPOWER	0x0080	/* Domain members share cpu power */
-#define SD_POWERSAVINGS_BALANCE	0x0100	/* Balance for power savings */
-#define SD_SHARE_PKG_RESOURCES	0x0200	/* Domain members share cpu pkg resources */
-#define SD_SERIALIZE		0x0400	/* Only a single load balancing instance */
-
-#define SD_PREFER_SIBLING	0x1000	/* Prefer to place tasks in a sibling domain */
+#define SD_LOAD_BALANCE		1	/* Do load balancing on this domain. */
+#define SD_BALANCE_NEWIDLE	2	/* Balance when about to become idle */
+#define SD_BALANCE_EXEC		4	/* Balance on exec */
+#define SD_BALANCE_FORK		8	/* Balance on fork, clone */
+#define SD_WAKE_IDLE		16	/* Wake to idle CPU on task wakeup */
+#define SD_WAKE_AFFINE		32	/* Wake task to waking CPU */
+#define SD_WAKE_BALANCE		64	/* Perform balancing at task wakeup */
+#define SD_SHARE_CPUPOWER	128	/* Domain members share cpu power */
+#define SD_POWERSAVINGS_BALANCE	256	/* Balance for power savings */
+#define SD_SHARE_PKG_RESOURCES	512	/* Domain members share cpu pkg resources */
+#define SD_SERIALIZE		1024	/* Only a single load balancing instance */
+#define SD_WAKE_IDLE_FAR	2048	/* Gain latency sacrificing cache hit */
 
 enum powersavings_balance_level {
 	POWERSAVINGS_BALANCE_NONE = 0,  /* No power saving load balance */
@@ -858,7 +851,7 @@ static inline int sd_balance_for_mc_power(void)
 	if (sched_smt_power_savings)
 		return SD_POWERSAVINGS_BALANCE;
 
-	return SD_PREFER_SIBLING;
+	return 0;
 }
 
 static inline int sd_balance_for_package_power(void)
@@ -866,7 +859,7 @@ static inline int sd_balance_for_package_power(void)
 	if (sched_mc_power_savings | sched_smt_power_savings)
 		return SD_POWERSAVINGS_BALANCE;
 
-	return SD_PREFER_SIBLING;
+	return 0;
 }
 
 /*
@@ -888,9 +881,15 @@ struct sched_group {
 
 	/*
 	 * CPU power of this group, SCHED_LOAD_SCALE being max power for a
-	 * single CPU.
+	 * single CPU. This is read only (except for setup, hotplug CPU).
+	 * Note : Never change cpu_power without recompute its reciprocal
 	 */
-	unsigned int cpu_power;
+	unsigned int __cpu_power;
+	/*
+	 * reciprocal value of cpu_power to avoid expensive divides
+	 * (see include/linux/reciprocal_div.h)
+	 */
+	u32 reciprocal_cpu_power;
 
 	/*
 	 * The CPUs this group covers.
@@ -943,7 +942,6 @@ struct sched_domain {
 	unsigned int newidle_idx;
 	unsigned int wake_idx;
 	unsigned int forkexec_idx;
-	unsigned int smt_gain;
 	int flags;			/* See SD_* */
 	enum sched_domain_level level;
 
@@ -1019,11 +1017,6 @@ static inline int test_sd_parent(struct sched_domain *sd, int flag)
 	return 0;
 }
 
-#ifdef CONFIG_CPU_CFS
-unsigned long default_scale_freq_power(struct sched_domain *sd, int cpu);
-unsigned long default_scale_smt_power(struct sched_domain *sd, int cpu);
-#endif
-
 #else /* CONFIG_SMP */
 
 struct sched_domain_attr;
@@ -1034,7 +1027,6 @@ partition_sched_domains(int ndoms_new, struct cpumask *doms_new,
 {
 }
 #endif	/* !CONFIG_SMP */
-
 
 struct io_context;			/* See blkdev.h */
 
@@ -1053,14 +1045,6 @@ struct uts_namespace;
 struct rq;
 struct sched_domain;
 
-#ifdef CONFIG_CPU_CFS
-
-/*
- * wake flags
- */
-#define WF_SYNC		0x01		/* waker goes to sleep after wakup */
-#define WF_FORK		0x02		/* child wakeup after fork */
-
 struct sched_class {
 	const struct sched_class *next;
 
@@ -1068,13 +1052,13 @@ struct sched_class {
 	void (*dequeue_task) (struct rq *rq, struct task_struct *p, int sleep);
 	void (*yield_task) (struct rq *rq);
 
-	void (*check_preempt_curr) (struct rq *rq, struct task_struct *p, int flags);
+	void (*check_preempt_curr) (struct rq *rq, struct task_struct *p, int sync);
 
 	struct task_struct * (*pick_next_task) (struct rq *rq);
 	void (*put_prev_task) (struct rq *rq, struct task_struct *p);
 
 #ifdef CONFIG_SMP
-	int  (*select_task_rq)(struct task_struct *p, int sd_flag, int flags);
+	int  (*select_task_rq)(struct task_struct *p, int sync);
 
 	unsigned long (*load_balance) (struct rq *this_rq, int this_cpu,
 			struct rq *busiest, unsigned long max_load_move,
@@ -1085,6 +1069,7 @@ struct sched_class {
 			      struct rq *busiest, struct sched_domain *sd,
 			      enum cpu_idle_type idle);
 	void (*pre_schedule) (struct rq *this_rq, struct task_struct *task);
+	int (*needs_post_schedule) (struct rq *this_rq);
 	void (*post_schedule) (struct rq *this_rq);
 	void (*task_wake_up) (struct rq *this_rq, struct task_struct *task);
 
@@ -1106,8 +1091,6 @@ struct sched_class {
 	void (*prio_changed) (struct rq *this_rq, struct task_struct *task,
 			     int oldprio, int running);
 
-	unsigned int (*get_rr_interval) (struct task_struct *task);
-
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	void (*moved_group) (struct task_struct *p);
 #endif
@@ -1117,6 +1100,7 @@ struct load_weight {
 	unsigned long weight, inv_weight;
 };
 
+#ifdef CONFIG_CPU_CFS
 /*
  * CFS stats for a schedulable entity (task, task-group etc)
  *
@@ -1146,15 +1130,11 @@ struct sched_entity {
 	u64			start_runtime;
 	u64			avg_wakeup;
 
-	u64			avg_running;
-
 #ifdef CONFIG_SCHEDSTATS
 	u64			wait_start;
 	u64			wait_max;
 	u64			wait_count;
 	u64			wait_sum;
-	u64			iowait_count;
-	u64			iowait_sum;
 
 	u64			sleep_start;
 	u64			sleep_max;
@@ -1218,15 +1198,14 @@ struct task_struct {
 
 	int lock_depth;		/* BKL lock depth */
 
-#ifdef CONFIG_CPU_CFS
-#ifdef CONFIG_SMP
+#if defined(CONFIG_SMP) && defined(CONFIG_CPU_CFS)
 #ifdef __ARCH_WANT_UNLOCKED_CTXSW
 	int oncpu;
-#endif
 #endif
 #else
 	int oncpu;
 #endif
+
 	int prio, static_prio, normal_prio;
 #ifdef CONFIG_CPU_BFS
 	int time_slice, first_time_slice;
@@ -1294,21 +1273,11 @@ struct task_struct {
 	unsigned did_exec:1;
 	unsigned in_execve:1;	/* Tell the LSMs that the process is doing an
 				 * execve */
-	unsigned in_iowait:1;
-
-
-#ifdef CONFIG_CPU_CFS
-	/* Revert to default priority/policy when forking */
-	unsigned sched_reset_on_fork:1;
-#endif
-
 	pid_t pid;
 	pid_t tgid;
 
-#ifdef CONFIG_CC_STACKPROTECTOR
 	/* Canary value for the -fstack-protector gcc feature */
 	unsigned long stack_canary;
-#endif
 
 	/* 
 	 * pointers to (original) parent process, youngest child, younger sibling,
@@ -1349,7 +1318,7 @@ struct task_struct {
 	cputime_t utime, stime, utimescaled, stimescaled;
 #ifdef CONFIG_CPU_BFS
 	unsigned long utime_pc, stime_pc;
-#endif
+#endif 
 	cputime_t gtime;
 	cputime_t prev_utime, prev_stime;
 	unsigned long nvcsw, nivcsw; /* context switch counts */
@@ -1871,9 +1840,8 @@ extern unsigned long long
 task_sched_runtime(struct task_struct *task);
 extern unsigned long long thread_group_sched_runtime(struct task_struct *task);
 
-
 /* sched_exec is called by processes performing an exec */
-#if defined(CONFIG_SMP) && defined(CONFIG_CPU_CFS)
+#if defined(CONFIG_CPU_CFS) && defined(CONFIG_SMP)
 extern void sched_exec(void);
 #else
 #define sched_exec()   {}
@@ -1901,12 +1869,11 @@ extern unsigned int sysctl_sched_min_granularity;
 extern unsigned int sysctl_sched_wakeup_granularity;
 extern unsigned int sysctl_sched_shares_ratelimit;
 extern unsigned int sysctl_sched_shares_thresh;
-extern unsigned int sysctl_sched_child_runs_first;
 #ifdef CONFIG_SCHED_DEBUG
+extern unsigned int sysctl_sched_child_runs_first;
 extern unsigned int sysctl_sched_features;
 extern unsigned int sysctl_sched_migration_cost;
 extern unsigned int sysctl_sched_nr_migrate;
-extern unsigned int sysctl_sched_time_avg;
 extern unsigned int sysctl_timer_migration;
 
 int sched_nr_latency_handler(struct ctl_table *table, int write,
@@ -2377,31 +2344,23 @@ static inline int need_resched(void)
  * cond_resched_softirq() will enable bhs before scheduling.
  */
 extern int _cond_resched(void);
-
-#define cond_resched() ({			\
-	__might_sleep(__FILE__, __LINE__, 0);	\
-	_cond_resched();			\
-})
-
-extern int __cond_resched_lock(spinlock_t *lock);
-
-#ifdef CONFIG_PREEMPT
-#define PREEMPT_LOCK_OFFSET	PREEMPT_OFFSET
+#ifdef CONFIG_PREEMPT_BKL
+static inline int cond_resched(void)
+{
+	return 0;
+}
 #else
-#define PREEMPT_LOCK_OFFSET	0
+static inline int cond_resched(void)
+{
+	return _cond_resched();
+}
 #endif
-
-#define cond_resched_lock(lock) ({				\
-	__might_sleep(__FILE__, __LINE__, PREEMPT_LOCK_OFFSET);	\
-	__cond_resched_lock(lock);				\
-})
-
-extern int __cond_resched_softirq(void);
-
-#define cond_resched_softirq() ({				\
-	__might_sleep(__FILE__, __LINE__, SOFTIRQ_OFFSET);	\
-	__cond_resched_softirq();				\
-})
+extern int cond_resched_lock(spinlock_t * lock);
+extern int cond_resched_softirq(void);
+static inline int cond_resched_bkl(void)
+{
+	return _cond_resched();
+}
 
 /*
  * Does a critical section need to be broken due to another
