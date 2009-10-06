@@ -148,6 +148,11 @@ int rr_interval __read_mostly = 6;
 int sched_iso_cpu __read_mostly = 70;
 
 /*
+ * The relative length of deadline for each priority(nice) level.
+ */
+static int prio_ratios[PRIO_RANGE] __read_mostly;
+
+/*
  * The quota handed out to tasks of all priority levels when refilling their
  * time_slice.
  */
@@ -572,6 +577,11 @@ static inline void requeue_task(struct task_struct *p)
 	sched_info_queued(p);
 }
 
+static inline int task_prio_ratio(struct task_struct *p)
+{
+	return prio_ratios[TASK_USER_PRIO(p)];
+}
+
 /*
  * task_timeslice - all tasks of all priorities get the exact same timeslice
  * length. CPU distribution is handled by giving different deadlines to
@@ -579,7 +589,7 @@ static inline void requeue_task(struct task_struct *p)
  */
 static inline int task_timeslice(struct task_struct *p)
 {
-	return (TASK_USER_PRIO(p) + 1) * rr_interval;
+	return (rr_interval * task_prio_ratio(p) / 100);
 }
 
 #ifdef CONFIG_SMP
@@ -2166,7 +2176,7 @@ EXPORT_SYMBOL(sub_preempt_count);
  */
 static inline int prio_deadline_diff(int user_prio)
 {
-	return (user_prio + 1) * rr_interval * HZ / 500;
+	return (prio_ratios[user_prio] * rr_interval * HZ / (1000 * 100)) ? : 1;
 }
 
 static inline int task_deadline_diff(struct task_struct *p)
@@ -2249,6 +2259,15 @@ retry:
 		}
 
 		dl = p->deadline + cache_distance(task_rq(p), rq, p);
+
+		/*
+		 * Look for tasks with old deadlines and pick them in FIFO
+		 * order, taking the first one found.
+		 */
+		if (time_before(dl, jiffies)) {
+			edt = p;
+			goto out_take;
+		}
 
 		/*
 		 * No rt tasks. Find the earliest deadline task. Now we're in
@@ -6025,6 +6044,10 @@ void __init sched_init(void)
 {
 	int i;
 	struct rq *rq;
+
+	prio_ratios[0] = 100;
+	for (i = 1 ; i < PRIO_RANGE ; i++)
+		prio_ratios[i] = prio_ratios[i - 1] * 11 / 10;
 
 	spin_lock_init(&grq.lock);
 #ifdef CONFIG_SMP
