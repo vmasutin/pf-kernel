@@ -50,6 +50,8 @@
 # define SCHED_RANGE(policy)	((policy) <= SCHED_MAX)
 #else
 # define SCHED_IDLE		5
+/* Can be ORed in to make sure the process is reverted back to SCHED_NORMAL on fork */
+# define SCHED_RESET_ON_FORK	0x40000000
 #endif
 
 #ifdef __KERNEL__
@@ -1273,6 +1275,12 @@ struct task_struct {
 	unsigned did_exec:1;
 	unsigned in_execve:1;	/* Tell the LSMs that the process is doing an
 				 * execve */
+
+#ifdef CONFIG_CPU_CFS
+	/* Revert to default priority/policy when forking */
+	unsigned sched_reset_on_fork:1;
+#endif
+
 	pid_t pid;
 	pid_t tgid;
 
