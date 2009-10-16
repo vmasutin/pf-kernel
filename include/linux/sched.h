@@ -5,7 +5,7 @@
  * ZenSched: define BFS_VERSION
  */
 #ifdef CONFIG_CPU_BFS
-# define BFS_VERSION    "v303"
+# define BFS_VERSION    "v304"
 #endif
 
 /*
