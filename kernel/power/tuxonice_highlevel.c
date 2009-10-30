@@ -214,6 +214,7 @@ early_init_err:
 		block_dump_save = block_dump;
 		set_cpus_allowed_ptr(current, CPU_MASK_ALL_PTR);
 	}
+	toi_put_modules();
 prehibernate_err:
 	if (hibernate_or_resume)
 		atomic_inc(&snapshot_device_available);
