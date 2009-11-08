@@ -2,7 +2,11 @@
 # Makefile for the linux kernel.
 #
 
-obj-y     = sched.o fork.o exec_domain.o panic.o printk.o \
+# CPU scheduler
+obj-$(CONFIG_CPU_CFS) = sched.o
+obj-$(CONFIG_CPU_BFS) = sched_bfs.o
+
+obj-y     += fork.o exec_domain.o panic.o printk.o \
 	    cpu.o exit.o itimer.o time.o softirq.o resource.o \
 	    sysctl.o capability.o ptrace.o timer.o user.o \
 	    signal.o sys.o kmod.o workqueue.o pid.o \
@@ -108,6 +112,7 @@ ifneq ($(CONFIG_SCHED_OMIT_FRAME_POINTER),y)
 # I turn this off for IA-64 only.  Andreas Schwab says it's also needed on m68k
 # to get a correct value for the wait-channel (WCHAN in ps). --davidm
 CFLAGS_sched.o := $(PROFILING) -fno-omit-frame-pointer
+CFLAGS_sched_bfs.o := $(PROFILING) -fno-omit-frame-pointer
 endif
 
 $(obj)/configs.o: $(obj)/config_data.h
