@@ -120,7 +120,7 @@ static inline int bfq_sample_valid(int samples)
  */
 static inline int bfq_bio_sync(struct bio *bio)
 {
-	if (bio_data_dir(bio) == READ || bio_sync(bio))
+	if (bio_data_dir(bio) == READ || bio_rw_flagged(bio, BIO_RW_SYNCIO))
 		return 1;
 
 	return 0;
