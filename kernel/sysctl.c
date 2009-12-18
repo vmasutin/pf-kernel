@@ -22,6 +22,7 @@
 #include <linux/mm.h>
 #include <linux/swap.h>
 #include <linux/slab.h>
+#include <linux/swap-prefetch.h>
 #include <linux/sysctl.h>
 #include <linux/proc_fs.h>
 #include <linux/security.h>
@@ -1641,6 +1642,32 @@ static struct ctl_table debug_table[] = {
 		.maxlen		= sizeof(int),
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec
+	},
+#endif
+#ifdef CONFIG_SWAP_PREFETCH
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "swap_prefetch",
+		.data		= &swap_prefetch,
+		.maxlen		= sizeof(swap_prefetch),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "swap_prefetch_delay",
+		.data		= &swap_prefetch_delay,
+		.maxlen		= sizeof(swap_prefetch_delay),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "swap_prefetch_sleep",
+		.data		= &swap_prefetch_sleep,
+		.maxlen		= sizeof(swap_prefetch_sleep),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
 	},
 #endif
 	{ .ctl_name = 0 }

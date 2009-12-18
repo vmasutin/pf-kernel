@@ -16,6 +16,7 @@
 #include <linux/slab.h>
 #include <linux/kernel_stat.h>
 #include <linux/swap.h>
+#include <linux/swap-prefetch.h>
 #include <linux/pagemap.h>
 #include <linux/init.h>
 #include <linux/highmem.h>
@@ -1779,6 +1780,8 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 
 	delayacct_freepages_start();
 
+	delay_swap_prefetch();
+
 	if (scanning_global_lru(sc))
 		count_vm_event(ALLOCSTALL);
 	/*
@@ -2924,6 +2927,8 @@ static void scan_zone_unevictable_pages(struct zone *zone)
 static void scan_all_zones_unevictable_pages(void)
 {
 	struct zone *zone;
+
+	delay_swap_prefetch();
 
 	for_each_zone(zone) {
 		scan_zone_unevictable_pages(zone);

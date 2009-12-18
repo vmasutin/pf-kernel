@@ -229,6 +229,11 @@ static inline void lru_cache_add_file(struct page *page, int tail)
 	____lru_cache_add(page, LRU_INACTIVE_FILE, tail);
 }
 
+static inline void lru_cache_add_tail(struct page *page)
+{
+	lru_cache_add_file(page, 1);
+}
+
 static inline void lru_cache_add_active_file(struct page *page)
 {
 	__lru_cache_add(page, LRU_ACTIVE_FILE);
