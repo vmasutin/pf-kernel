@@ -179,9 +179,9 @@ config SWAP
 	  in your computer.  If unsure say Y.
 
 config SWAP_PREFETCH
-	bool "Support for prefetching swapped memory"
+	bool "Support for prefetching swapped memory (CURRENTLY BROKEN)"
 	depends on SWAP
-	default y
+	default n
 	---help---
 	  This option will allow the kernel to prefetch swapped memory pages
 	  when idle. The pages will be kept on both swap and in swap_cache
