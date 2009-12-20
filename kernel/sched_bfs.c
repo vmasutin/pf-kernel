@@ -116,11 +116,7 @@
  * Value is in ms and set to a minimum of 6ms. Scales with number of cpus.
  * Tunable via /proc interface.
  */
-#ifdef CONFIG_BFS_CUSTOM_RR
-int rr_interval __read_mostly = CONFIG_BFS_RR_INTERVAL;
-#else
-int rr_interval __read_mostly = 6;
-#endif
+int rr_interval __read_mostly = CONFIG_SCHED_BFS_RR;
 
 /*
  * sched_iso_cpu - sysctl which determines the cpu percentage SCHED_ISO tasks
@@ -1229,7 +1225,7 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 
 	if (p->prio > highest_prio || (p->prio == highest_prio &&
 	    p->policy == SCHED_NORMAL && !time_before(p->deadline, latest_deadline)))
-		return;
+	    	return;
 
 	/* p gets to preempt highest_prio_rq->curr */
 	resched_task(highest_prio_rq->curr);
@@ -1627,7 +1623,7 @@ static inline void finish_task_switch(struct rq *rq, struct task_struct *prev)
 		/*
 		 * Remove function-return probe instances associated with this
 		 * task and put them back on the free list.
-		 */
+	 	 */
 		kprobe_flush_task(prev);
 		put_task_struct(prev);
 	}
@@ -2576,7 +2572,7 @@ need_resched_nonpreemptible:
 		/* Task changed affinity off this cpu */
 		if (unlikely(!cpus_intersects(prev->cpus_allowed,
 		    cpumask_of_cpu(cpu))))
-			resched_suitable_idle(prev);
+		    	resched_suitable_idle(prev);
 	}
 
 	if (likely(queued_notrunning())) {
@@ -2622,7 +2618,7 @@ need_resched_nonpreemptible:
 		goto need_resched_nonpreemptible;
 	preempt_enable_no_resched();
 	if (need_resched())
-		goto need_resched;
+ 		goto need_resched;
 }
 EXPORT_SYMBOL(schedule);
 
@@ -3458,7 +3454,7 @@ recheck:
 					if (policy == SCHED_BATCH)
 						goto out;
 					if (policy != SCHED_IDLEPRIO)
-						return -EPERM;
+					    	return -EPERM;
 					break;
 				case SCHED_IDLEPRIO:
 					if (policy == SCHED_IDLEPRIO)

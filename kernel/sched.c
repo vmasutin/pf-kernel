@@ -1,3 +1,6 @@
+#ifdef CONFIG_SCHED_BFS
+#include "sched_bfs.c"
+#else
 /*
  *  kernel/sched.c
  *
@@ -6082,12 +6085,12 @@ out_unlock:
 }
 EXPORT_SYMBOL(set_user_nice);
 
-#ifdef CONFIG_CFS_BOOST
+#ifdef CONFIG_SCHED_CFS_BOOST
 /*
  * Nice level for privileged tasks. (can be set to 0 for this
  * to be turned off)
  */
-int sysctl_sched_privileged_nice_level __read_mostly = CONFIG_CFS_BOOST_NICE;
+int sysctl_sched_privileged_nice_level __read_mostly = CONFIG_SCHED_CFS_BOOST_VALUE;
 
 static int __init privileged_nice_level_setup(char *str)
 {
@@ -6112,11 +6115,6 @@ void sched_privileged_task(struct task_struct *p)
 	 */
 	if (unlikely(!new_nice))
 		return;
-
-	if (new_nice < -20)
-		new_nice = -20;
-	else if (new_nice > 19)
-		new_nice = 19;
 
 	set_user_nice(p, new_nice);
 }
@@ -10972,3 +10970,4 @@ void synchronize_sched_expedited(void)
 EXPORT_SYMBOL_GPL(synchronize_sched_expedited);
 
 #endif /* #else #ifndef CONFIG_SMP */
+#endif /* CONFIG_SCHED_BFS */
