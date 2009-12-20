@@ -1604,7 +1604,12 @@ static inline void sched_exit(struct task_struct *p)
 
 static inline void set_oom_timeslice(struct task_struct *p)
 {
+#ifdef CONFIG_SCHED_CFS_BOOST
+	if (p->policy == SCHED_NORMAL || p->policy == SCHED_BATCH)
+		sched_privileged_task(p);
+#else
 	p->rt.time_slice = HZ;
+#endif
 }
 
 static inline void tsk_cpus_current(struct task_struct *p)
@@ -2035,6 +2040,10 @@ static inline int rt_mutex_getprio(struct task_struct *p)
 #endif
 
 extern void set_user_nice(struct task_struct *p, long nice);
+#ifdef CONFIG_SCHED_CFS_BOOST
+extern void sched_privileged_task(struct task_struct *p);
+extern int sysctl_sched_privileged_nice_level;
+#endif
 extern int task_prio(const struct task_struct *p);
 extern int task_nice(const struct task_struct *p);
 extern int can_nice(const struct task_struct *p, const int nice);
