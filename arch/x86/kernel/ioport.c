@@ -48,6 +48,7 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 			return -EPERM;
 		/* Start X as SCHED_ISO */
 		sched_setscheduler_nocheck(current, SCHED_ISO, &param);
+	}
 #elif defined(CONFIG_SCHED_CFS_BOOST)
 	if (turn_on) {
 		if (!capable(CAP_SYS_RAWIO))
