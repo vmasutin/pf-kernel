@@ -1585,7 +1585,7 @@ static inline void tsk_cpus_current(struct task_struct *p)
 
 static inline void print_scheduler_version(void)
 {
-	printk(KERN_INFO"BFS CPU scheduler v0.312 by Con Kolivas.\n");
+	printk(KERN_INFO"BFS CPU scheduler v0.313 by Con Kolivas.\n");
 }
 
 static inline int iso_task(struct task_struct *p)
@@ -1595,6 +1595,11 @@ static inline int iso_task(struct task_struct *p)
 #else
 extern int runqueue_is_locked(int cpu);
 extern void task_rq_unlock_wait(struct task_struct *p);
+#ifdef CONFIG_SCHED_CFS_BOOST
+extern void sched_privileged_task(struct task_struct *p);
+extern int sysctl_sched_privileged_nice_level;
+#endif
+
 #define tsk_seruntime(t)	((t)->se.sum_exec_runtime)
 #define tsk_rttimeout(t)	((t)->rt.timeout)
 
@@ -2040,10 +2045,6 @@ static inline int rt_mutex_getprio(struct task_struct *p)
 #endif
 
 extern void set_user_nice(struct task_struct *p, long nice);
-#ifdef CONFIG_SCHED_CFS_BOOST
-extern void sched_privileged_task(struct task_struct *p);
-extern int sysctl_sched_privileged_nice_level;
-#endif
 extern int task_prio(const struct task_struct *p);
 extern int task_nice(const struct task_struct *p);
 extern int can_nice(const struct task_struct *p, const int nice);
