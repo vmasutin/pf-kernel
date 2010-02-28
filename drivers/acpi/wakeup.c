@@ -124,7 +124,7 @@ void acpi_disable_wakeup_device(u8 sleep_state)
 	}
 }
 
-static int __init acpi_wakeup_device_init(void)
+int __init acpi_wakeup_device_init(void)
 {
 	struct list_head *node, *next;
 
