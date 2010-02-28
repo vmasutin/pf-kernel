@@ -1,8 +1,8 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 33
-EXTRAVERSION =
-NAME = Man-Eating Seals of Antiquity
+EXTRAVERSION = -ck1
+NAME = BFS Powered
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
