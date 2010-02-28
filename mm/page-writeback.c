@@ -67,6 +67,8 @@ int dirty_background_ratio = dirty_background_ratio_default;
 int dirty_background_ratio = dirty_background_ratio_server;
 #elif defined(CONFIG_ZEN_DESKTOP)
 int dirty_background_ratio = dirty_background_ratio_desktop;
+#elif defined(CONFIG_ZEN_CUSTOM)
+int dirty_background_ratio = dirty_background_ratio_custom;
 #endif
 
 /*
@@ -90,6 +92,8 @@ int vm_dirty_ratio = vm_dirty_ratio_default;
 int vm_dirty_ratio = vm_dirty_ratio_server;
 #elif defined(CONFIG_ZEN_DESKTOP)
 int vm_dirty_ratio = vm_dirty_ratio_desktop;
+#elif defined(CONFIG_ZEN_CUSTOM)
+int vm_dirty_ratio = vm_dirty_ratio_custom;
 #endif
 
 /*
