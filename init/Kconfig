@@ -47,21 +47,6 @@ config SCHED_CFS
 	This is the default cpu scheduler found in the upstream kernel.
 endchoice
 
-config SCHED_BFS_RR
-	int "BFS rr_interval (in ms)"
-	depends on SCHED_BFS
-	range 1 5000
-	default 6
-	---help---
-	  This is the default rr_interval value that bfs will use. Set to 6ms 
-	  by default because that is approximately the amount of time the human
-	  eye can register changes. Acceptable values are 1-5000. In addition,
-	  this value scales with the number of CPUs and is also adjustable via
-	  the /proc interface.
-
-	  Choose 3ms for an interactive/responsive desktop
-	  If unsure, choose 6ms
-
 config SCHED_BFS_AUTOISO
 	bool "Automatically use SCHED_ISO policy for X"
 	depends on SCHED_BFS
@@ -95,6 +80,43 @@ config SCHED_CFS_BOOST_VALUE
 	depends on SCHED_CFS_BOOST
 	range -20 19
 	default -10
+
+choice
+	prompt "Zen-Tune Profile"
+	default ZEN_DESKTOP
+	---help---
+	  Select the tunable profile to be used.
+
+config ZEN_SERVER
+	bool "Server"
+	---help---
+	  This option sets tunables for a server environment.
+	    DIRTY_RATIO: 80
+	    BACKGROUND_DIRTY_RATIO: 1
+	   *BFS ONLY*
+            ISO_CPU: 70
+	    RR_INTERVAL: 6
+		
+config ZEN_DEFAULT
+	bool "Default"
+	---help---
+	  This option sets tunables to default.
+	    DIRTY_RATIO: 20
+	    BACKGROUND_DIRTY_RATIO: 10
+	   *BFS ONLY*
+	    ISO_CPU: 70
+	    RR_INTERVAL: 6
+
+config ZEN_DESKTOP
+	bool "Desktop"
+	---help---
+	  This option sets tunables for a desktop environment.
+	   DIRTY_RATIO: 50
+	   BACKGROUND_DIRTY_RATIO: 20
+	  *BFS ONLY*
+	   ISO_CPU: 25
+	   RR_INTERVAL: 3
+endchoice
 
 config EXPERIMENTAL
 	bool "Prompt for development and/or incomplete code/drivers"
