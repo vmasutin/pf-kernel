@@ -800,10 +800,9 @@ static inline void clear_cpuidle_map(unsigned long cpu)
 {
 }
 
-/* Always called from a busy cpu on UP */
 static inline int suitable_idle_cpus(struct task_struct *p)
 {
-	return 0;
+	return uprq->curr == uprq->idle;
 }
 
 static inline void resched_suitable_idle(struct task_struct *p)
@@ -982,7 +981,7 @@ static void resched_task(struct task_struct *p)
 #else
 static inline void resched_task(struct task_struct *p)
 {
-	assert_spin_locked(&grq.lock);
+	assert_raw_spin_locked(&grq.lock);
 	set_tsk_need_resched(p);
 }
 #endif
@@ -1248,10 +1247,10 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 #else /* CONFIG_SMP */
 static void try_preempt(struct task_struct *p, struct rq *this_rq)
 {
-	if (p->prio < this_rq->rq_prio ||
-	    (p->prio == this_rq->rq_prio && p->policy == SCHED_NORMAL &&
-	     time_before(p->deadline, this_rq->rq_deadline)))
-		resched_task(this_rq->curr);
+	if (p->prio < uprq->rq_prio ||
+	    (p->prio == uprq->rq_prio && p->policy == SCHED_NORMAL &&
+	     time_before(p->deadline, uprq->rq_deadline)))
+		resched_task(uprq->curr);
 	return;
 }
 #endif /* CONFIG_SMP */
