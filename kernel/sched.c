@@ -846,6 +846,26 @@ static inline int task_current(struct rq *rq, struct task_struct *p)
 	return rq->curr == p;
 }
 
+/*
+ * Look for any tasks *anywhere* that are running nice 0 or better. We do
+ * this lockless for overhead reasons since the occasional wrong result
+ * is harmless.
+ */
+int above_background_load(void)
+{
+	struct task_struct *cpu_curr;
+	unsigned long cpu;
+
+	for_each_online_cpu(cpu) {
+		cpu_curr = cpu_rq(cpu)->curr;
+		if (unlikely(!cpu_curr))
+			continue;
+		if (PRIO_TO_NICE(cpu_curr->static_prio) < 1)
+			return 1;
+	}
+	return 0;
+}
+
 #ifndef __ARCH_WANT_UNLOCKED_CTXSW
 static inline int task_running(struct rq *rq, struct task_struct *p)
 {
@@ -4356,6 +4376,42 @@ out_unlock:
 	task_rq_unlock(rq, &flags);
 }
 EXPORT_SYMBOL(set_user_nice);
+
+#ifdef CONFIG_SCHED_CFS_BOOST
+/*
+ * Nice level for privileged tasks. (can be set to 0 for this
+ * to be turned off)
+ */
+int sysctl_sched_privileged_nice_level __read_mostly = CONFIG_SCHED_CFS_BOOST_VALUE;
+
+static int __init privileged_nice_level_setup(char *str)
+{
+	sysctl_sched_privileged_nice_level = simple_strtol(str, NULL, 0);
+	return 1;
+}
+__setup("privileged_nice_level=", privileged_nice_level_setup);
+
+/*
+ * Tasks with special privileges call this and gain extra nice
+ * levels:
+ */
+void sched_privileged_task(struct task_struct *p)
+{
+	long new_nice = sysctl_sched_privileged_nice_level;
+	long old_nice = TASK_NICE(p);
+
+	if (new_nice >= old_nice)
+		return;
+	/*
+	 * Setting the sysctl to 0 turns off the boosting:
+	 */
+	if (unlikely(!new_nice))
+		return;
+
+	set_user_nice(p, new_nice);
+}
+EXPORT_SYMBOL(sched_privileged_task);
+#endif
 
 /*
  * can_nice - check if a task can reduce its nice value
