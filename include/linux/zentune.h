@@ -14,7 +14,7 @@
 #define sched_iso_cpu_server sched_iso_cpu_default;
 /* desktop */
 #define rr_interval_desktop 3;
-#define sched_iso_cpu_desktop 25;
+#define sched_iso_cpu_desktop sched_iso_cpu_default;
 /* custom */
 #define rr_interval_custom CONFIG_RR_INTERVAL_CUSTOM;
 #define sched_iso_cpu_custom CONFIG_ISO_CPU_CUSTOM;
