@@ -1711,8 +1711,10 @@ static inline int effective_sc_prio(struct task_struct *p)
 	if (likely(p->mm)) {
 		if (rt_task(p))
 			return -20;
+#ifdef CONFIG_SCHED_BFS
 		if (p->policy == SCHED_IDLEPRIO)
 			return 19;
+#endif
 		return task_nice(p);
 	}
 	return 0;
