@@ -552,6 +552,9 @@ static inline int usb_disable_autosuspend(struct usb_device *udev)
 static inline void usb_device_autosuspend_enable(struct usb_device *udev)
 { }
 
+static inline void usb_device_autosuspend_enable(struct usb_device *udev)
+{ }
+
 static inline int usb_autopm_get_interface(struct usb_interface *intf)
 { return 0; }
 static inline int usb_autopm_get_interface_async(struct usb_interface *intf)
