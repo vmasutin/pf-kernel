@@ -526,10 +526,10 @@ extern struct usb_device *usb_find_device(u16 vendor_id, u16 product_id);
 
 /* USB autosuspend and autoresume */
 #ifdef CONFIG_USB_SUSPEND
+extern void usb_device_autosuspend_enable(struct usb_device *udev);
 extern int usb_enable_autosuspend(struct usb_device *udev);
 extern int usb_disable_autosuspend(struct usb_device *udev);
 
-extern void usb_device_autosuspend_enable(struct usb_device *udev);
 extern int usb_autopm_get_interface(struct usb_interface *intf);
 extern void usb_autopm_put_interface(struct usb_interface *intf);
 extern int usb_autopm_get_interface_async(struct usb_interface *intf);
@@ -548,9 +548,6 @@ static inline int usb_enable_autosuspend(struct usb_device *udev)
 { return 0; }
 static inline int usb_disable_autosuspend(struct usb_device *udev)
 { return 0; }
-
-static inline void usb_device_autosuspend_enable(struct usb_device *udev)
-{ }
 
 static inline void usb_device_autosuspend_enable(struct usb_device *udev)
 { }
