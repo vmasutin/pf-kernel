@@ -670,7 +670,7 @@ __mod_timer(struct timer_list *timer, unsigned long expires,
 		if (preferred_cpu >= 0)
 			cpu = preferred_cpu;
 	}
-
+#endif /* CONFIG_SCHED_CFS */
 #endif
 	new_base = per_cpu(tvec_bases, cpu);
 
