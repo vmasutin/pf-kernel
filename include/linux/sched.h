@@ -278,10 +278,22 @@ extern void init_idle_bootup_task(struct task_struct *idle);
 
 extern cpumask_var_t nohz_cpu_mask;
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ)
+#ifdef CONFIG_SCHED_CFS
 extern void select_nohz_load_balancer(int stop_tick);
 extern int get_nohz_timer_target(void);
 #else
+extern int select_nohz_load_balancer(int cpu);
+extern int get_nohz_load_balancer(void);
+#endif /* CONFIG_SCHED_CFS */
+#else
+#ifdef CONFIG_SCHED_CFS
 static inline void select_nohz_load_balancer(int stop_tick) { }
+#else
+static inline int select_nohz_load_balancer(int cpu)
+{
+	return 0;
+}
+#endif /* CONFIG_SCHED_CFS */
 #endif
 
 /*
