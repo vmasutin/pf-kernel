@@ -52,7 +52,7 @@ asmlinkage long sys_ioperm(unsigned long from, unsigned long num, int turn_on)
 #elif defined(CONFIG_SCHED_CFS_BOOST)
 	if (turn_on) {
 		if (!capable(CAP_SYS_RAWIO))
-		return -EPERM;
+			return -EPERM;
 		/*
 		 * Task will be accessing hardware IO ports,
 		 * mark it as special with the scheduler too:
