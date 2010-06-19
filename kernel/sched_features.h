@@ -13,11 +13,7 @@ SCHED_FEAT(FAIR_SLEEPERS, 1)
  * them to run sooner, but does not allow tons of sleepers to
  * rip the spread apart.
  */
-#ifdef CONFIG_ZEN_DESKTOP
-SCHED_FEAT(GENTLE_FAIR_SLEEPERS, 0)
-#else
 SCHED_FEAT(GENTLE_FAIR_SLEEPERS, 1)
-#endif /* CONFIG_ZEN_DESKTOP */
 /*
  * By not normalizing the sleep time, heavy tasks get an effective
  * longer period, and lighter task an effective shorter period they
