@@ -5059,6 +5059,8 @@ void ata_qc_complete(struct ata_queued_cmd *qc)
 {
 	struct ata_port *ap = qc->ap;
 
+	unexpect_irq(ap->irq_expect, false);
+
 	/* XXX: New EH and old EH use different mechanisms to
 	 * synchronize EH with regular execution path.
 	 *
@@ -5174,6 +5176,9 @@ int ata_qc_complete_multiple(struct ata_port *ap, u32 qc_active)
 		done_mask &= ~(1 << tag);
 	}
 
+	if (ap->qc_active)
+		expect_irq(ap->irq_expect);
+
 	return nr_done;
 }
 
@@ -5240,6 +5245,7 @@ void ata_qc_issue(struct ata_queued_cmd *qc)
 	qc->err_mask |= ap->ops->qc_issue(qc);
 	if (unlikely(qc->err_mask))
 		goto err;
+	expect_irq(ap->irq_expect);
 	return;
 
 sg_err:
@@ -6304,8 +6310,13 @@ int ata_host_activate(struct ata_host *host, int irq,
 	if (rc)
 		return rc;
 
-	for (i = 0; i < host->n_ports; i++)
-		ata_port_desc(host->ports[i], "irq %d", irq);
+	for (i = 0; i < host->n_ports; i++) {
+		struct ata_port *ap = host->ports[i];
+
+		if (!ata_port_is_dummy(ap))
+			ap->irq_expect = init_irq_expect(irq, host);
+		ata_port_desc(ap, "irq %d%s", irq, ap->irq_expect ? "+" : "");
+	}
 
 	rc = ata_host_register(host, sht);
 	/* if failed, just free the IRQ and leave ports alone */
