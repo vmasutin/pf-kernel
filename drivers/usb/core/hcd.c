@@ -2164,6 +2164,7 @@ int usb_add_hcd(struct usb_hcd *hcd,
 					"request interrupt %d failed\n", irqnum);
 			goto err_request_irq;
 		}
+		watch_irq(irqnum, hcd);
 		hcd->irq = irqnum;
 		dev_info(hcd->self.controller, "irq %d, %s 0x%08llx\n", irqnum,
 				(hcd->driver->flags & HCD_MEMORY) ?
