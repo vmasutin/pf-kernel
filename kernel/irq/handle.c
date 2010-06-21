@@ -419,6 +419,7 @@ irqreturn_t handle_IRQ_event(unsigned int irq, struct irqaction *action)
 		}
 
 		retval |= ret;
+		action->watch.last_ret = ret;
 		action = action->next;
 	} while (action);
 
