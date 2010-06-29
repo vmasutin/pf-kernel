@@ -81,7 +81,11 @@ unsigned int sysctl_sched_child_runs_first __read_mostly = 1;
  * This option switches the agressive yield implementation of the
  * old scheduler back on.
  */
+#ifdef CONFIG_ZEN_DESKTOP
+unsigned int __read_mostly sysctl_sched_compat_yield = 1;
+#else
 unsigned int __read_mostly sysctl_sched_compat_yield;
+#endif /* CONFIG_ZEN_DESKTOP */
 
 /*
  * SCHED_OTHER wake-up granularity.
