@@ -1,3 +1,6 @@
+#ifdef CONFIG_SCHED_BFS
+#include "sched_bfs.c"
+#else
 /*
  *  kernel/sched.c
  *
@@ -504,7 +507,7 @@ struct rq {
 	unsigned long cpu_load[CPU_LOAD_IDX_MAX];
 	unsigned long last_load_update_tick;
 #ifdef CONFIG_NO_HZ
-	unsigned char in_nohz_recently;
+	unsigned char nohz_balance_kick;
 #endif
 	/* capture load from *all* tasks on this cpu: */
 	struct load_weight load;
@@ -842,6 +845,26 @@ static inline u64 global_rt_runtime(void)
 static inline int task_current(struct rq *rq, struct task_struct *p)
 {
 	return rq->curr == p;
+}
+
+/*
+ * Look for any tasks *anywhere* that are running nice 0 or better. We do
+ * this lockless for overhead reasons since the occasional wrong result
+ * is harmless.
+ */
+int above_background_load(void)
+{
+	struct task_struct *cpu_curr;
+	unsigned long cpu;
+
+	for_each_online_cpu(cpu) {
+		cpu_curr = cpu_rq(cpu)->curr;
+		if (unlikely(!cpu_curr))
+			continue;
+		if (PRIO_TO_NICE(cpu_curr->static_prio) < 1)
+			return 1;
+	}
+	return 0;
 }
 
 #ifndef __ARCH_WANT_UNLOCKED_CTXSW
@@ -1201,6 +1224,27 @@ static void resched_cpu(int cpu)
 }
 
 #ifdef CONFIG_NO_HZ
+/*
+ * In the semi idle case, use the nearest busy cpu for migrating timers
+ * from an idle cpu.  This is good for power-savings.
+ *
+ * We don't do similar optimization for completely idle system, as
+ * selecting an idle cpu will add more delays to the timers than intended
+ * (as that cpu's timer base may not be uptodate wrt jiffies etc).
+ */
+int get_nohz_timer_target(void)
+{
+	int cpu = smp_processor_id();
+	int i;
+	struct sched_domain *sd;
+
+	for_each_domain(cpu, sd) {
+		for_each_cpu(i, sched_domain_span(sd))
+			if (!idle_cpu(i))
+				return i;
+	}
+	return cpu;
+}
 /*
  * When add_timer_on() enqueues a timer into the timer wheel of an
  * idle CPU then this timer might expire before the next timer event
@@ -4439,6 +4483,42 @@ out_unlock:
 	task_rq_unlock(rq, &flags);
 }
 EXPORT_SYMBOL(set_user_nice);
+
+#ifdef CONFIG_SCHED_CFS_BOOST
+/*
+ * Nice level for privileged tasks. (can be set to 0 for this
+ * to be turned off)
+ */
+int sysctl_sched_privileged_nice_level __read_mostly = CONFIG_SCHED_CFS_BOOST_VALUE;
+
+static int __init privileged_nice_level_setup(char *str)
+{
+	sysctl_sched_privileged_nice_level = simple_strtol(str, NULL, 0);
+	return 1;
+}
+__setup("privileged_nice_level=", privileged_nice_level_setup);
+
+/*
+ * Tasks with special privileges call this and gain extra nice
+ * levels:
+ */
+void sched_privileged_task(struct task_struct *p)
+{
+	long new_nice = sysctl_sched_privileged_nice_level;
+	long old_nice = TASK_NICE(p);
+
+	if (new_nice >= old_nice)
+		return;
+	/*
+	 * Setting the sysctl to 0 turns off the boosting:
+	 */
+	if (unlikely(!new_nice))
+		return;
+
+	set_user_nice(p, new_nice);
+}
+EXPORT_SYMBOL(sched_privileged_task);
+#endif
 
 /*
  * can_nice - check if a task can reduce its nice value
@@ -7892,6 +7972,10 @@ void __init sched_init(void)
 		rq->avg_idle = 2*sysctl_sched_migration_cost;
 		INIT_LIST_HEAD(&rq->migration_queue);
 		rq_attach_root(rq, &def_root_domain);
+#ifdef CONFIG_NO_HZ
+		rq->nohz_balance_kick = 0;
+		init_sched_softirq_csd(&per_cpu(remote_sched_softirq_cb, i));
+#endif
 #endif
 		init_rq_hrtick(rq);
 		atomic_set(&rq->nr_iowait, 0);
@@ -7936,8 +8020,11 @@ void __init sched_init(void)
 	zalloc_cpumask_var(&nohz_cpu_mask, GFP_NOWAIT);
 #ifdef CONFIG_SMP
 #ifdef CONFIG_NO_HZ
-	zalloc_cpumask_var(&nohz.cpu_mask, GFP_NOWAIT);
-	alloc_cpumask_var(&nohz.ilb_grp_nohz_mask, GFP_NOWAIT);
+	zalloc_cpumask_var(&nohz.idle_cpus_mask, GFP_NOWAIT);
+	alloc_cpumask_var(&nohz.grp_idle_mask, GFP_NOWAIT);
+	atomic_set(&nohz.load_balancer, nr_cpu_ids);
+	atomic_set(&nohz.first_pick_cpu, nr_cpu_ids);
+	atomic_set(&nohz.second_pick_cpu, nr_cpu_ids);
 #endif
 	/* May be allocated at isolcpus cmdline parse time */
 	if (cpu_isolated_map == NULL)
@@ -9295,3 +9382,4 @@ void synchronize_sched_expedited(void)
 EXPORT_SYMBOL_GPL(synchronize_sched_expedited);
 
 #endif /* #else #ifndef CONFIG_SMP */
+#endif /* CONFIG_SCHED_BFS */
