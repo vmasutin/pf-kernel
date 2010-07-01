@@ -83,6 +83,8 @@ static inline void bdi_work_init(struct bdi_work *work,
 	work->state = WS_USED;
 }
 
+static int check_work_queued(struct bdi_writeback *wb);
+
 /**
  * writeback_in_progress - determine whether there is writeback in progress
  * @bdi: the device's backing_dev_info structure.
@@ -777,7 +779,8 @@ static long wb_writeback(struct bdi_writeback *wb,
 		 * For background writeout, stop when we are below the
 		 * background dirty threshold
 		 */
-		if (args->for_background && !over_bground_thresh())
+		if (args->for_background &&
+		    (!over_bground_thresh() || check_work_queued(wb)))
 			break;
 
 		wbc.more_io = 0;
@@ -846,6 +849,27 @@ static struct bdi_work *get_next_work_item(struct backing_dev_info *bdi,
 	rcu_read_unlock();
 	return ret;
 }
+
+/* Check whether there is some work queued for this thread */
+static int check_work_queued(struct bdi_writeback *wb)
+{
+	struct backing_dev_info *bdi = wb->bdi;
+	struct bdi_work *work;
+	int ret = 0;
+
+	rcu_read_lock();
+
+	list_for_each_entry_rcu(work, &bdi->work_list, list) {
+		if (!test_bit(wb->nr, &work->seen))
+			continue;
+		ret = 1;
+		break;
+	}
+
+	rcu_read_unlock();
+	return ret;
+}
+
 
 static long wb_check_old_data_flush(struct bdi_writeback *wb)
 {
