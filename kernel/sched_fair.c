@@ -35,9 +35,13 @@
  * (to see the precise effective timeslice length of your workload,
  *  run vmstat and monitor the context-switches (cs) field)
  */
+#ifdef CONFIG_ZEN_DESKTOP
+unsigned int sysctl_sched_latency = 3000000ULL;
+unsigned int normalized_sysctl_sched_latency = 3000000ULL;
+#else
 unsigned int sysctl_sched_latency = 5000000ULL;
 unsigned int normalized_sysctl_sched_latency = 5000000ULL;
-
+#endif /* CONFIG_ZEN_DESKTOP */
 /*
  * The initial- and re-scaling of tunables is configurable
  * (default SCHED_TUNABLESCALING_LOG = *(1+ilog(ncpus))
@@ -60,8 +64,11 @@ unsigned int normalized_sysctl_sched_min_granularity = 1000000ULL;
 /*
  * is kept at sysctl_sched_latency / sysctl_sched_min_granularity
  */
+#ifdef CONFIG_ZEN_DESKTOP
+static unsigned int sched_nr_latency = 3;
+#else
 static unsigned int sched_nr_latency = 5;
-
+#endif /* CONFIG_ZEN_DESKTOP */
 /*
  * After fork, child runs first. If set to 0 (default) then
  * parent will (try to) run first.
@@ -74,7 +81,11 @@ unsigned int sysctl_sched_child_runs_first __read_mostly = 1;
  * This option switches the agressive yield implementation of the
  * old scheduler back on.
  */
+#ifdef CONFIG_ZEN_DESKTOP
+unsigned int __read_mostly sysctl_sched_compat_yield = 1;
+#else
 unsigned int __read_mostly sysctl_sched_compat_yield;
+#endif /* CONFIG_ZEN_DESKTOP */
 
 /*
  * SCHED_OTHER wake-up granularity.
