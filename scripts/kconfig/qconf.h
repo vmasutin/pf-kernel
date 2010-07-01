@@ -3,18 +3,9 @@
  * Released under the terms of the GNU GPL v2.0.
  */
 
-#include <q3listview.h>
+#include <qlistview.h>
 #if QT_VERSION >= 300
 #include <qsettings.h>
-//Added by qt3to4:
-#include <QContextMenuEvent>
-#include <QCloseEvent>
-#include <QFocusEvent>
-#include <Q3ValueList>
-#include <QPixmap>
-#include <QMouseEvent>
-#include <Q3PopupMenu>
-#include <QKeyEvent>
 #else
 class QSettings {
 public:
@@ -43,8 +34,8 @@ class ConfigMainWindow;
 
 class ConfigSettings : public QSettings {
 public:
-	Q3ValueList<int> readSizes(const QString& key, bool *ok);
-	bool writeSizes(const QString& key, const Q3ValueList<int>& value);
+	QValueList<int> readSizes(const QString& key, bool *ok);
+	bool writeSizes(const QString& key, const QValueList<int>& value);
 };
 
 enum colIdx {
@@ -54,9 +45,9 @@ enum listMode {
 	singleMode, menuMode, symbolMode, fullMode, listMode
 };
 
-class ConfigList : public Q3ListView {
+class ConfigList : public QListView {
 	Q_OBJECT
-	typedef class Q3ListView Parent;
+	typedef class QListView Parent;
 public:
 	ConfigList(ConfigView* p, const char *name = 0);
 	void reinit(void);
@@ -64,7 +55,7 @@ public:
 	{
 		return (ConfigView*)Parent::parent();
 	}
-	ConfigItem* findConfigItem(KCMenu *);
+	ConfigItem* findConfigItem(struct menu *);
 
 protected:
 	void keyPressEvent(QKeyEvent *e);
@@ -76,7 +67,7 @@ protected:
 	void contextMenuEvent(QContextMenuEvent *e);
 
 public slots:
-	void setRootMenu(KCMenu *menu);
+	void setRootMenu(struct menu *menu);
 
 	void updateList(ConfigItem *item);
 	void setValue(ConfigItem* item, tristate val);
@@ -84,10 +75,10 @@ public slots:
 	void updateSelection(void);
 	void saveSettings(void);
 signals:
-	void menuChanged(KCMenu *menu);
-	void menuSelected(KCMenu *menu);
+	void menuChanged(struct menu *menu);
+	void menuSelected(struct menu *menu);
 	void parentSelected(void);
-	void gotFocus(KCMenu *);
+	void gotFocus(struct menu *);
 
 public:
 	void updateListAll(void)
@@ -125,7 +116,7 @@ public:
 	void setParentMenu(void);
 
 	template <class P>
-	void updateMenuList(P*, KCMenu*);
+	void updateMenuList(P*, struct menu*);
 
 	bool updateAll;
 
@@ -135,30 +126,30 @@ public:
 
 	bool showAll, showName, showRange, showData;
 	enum listMode mode;
-	KCMenu *rootEntry;
+	struct menu *rootEntry;
 	QColorGroup disabledColorGroup;
 	QColorGroup inactivedColorGroup;
-	Q3PopupMenu* headerPopup;
+	QPopupMenu* headerPopup;
 
 private:
 	int colMap[colNr];
 	int colRevMap[colNr];
 };
 
-class ConfigItem : public Q3ListViewItem {
-	typedef class Q3ListViewItem Parent;
+class ConfigItem : public QListViewItem {
+	typedef class QListViewItem Parent;
 public:
-	ConfigItem(Q3ListView *parent, ConfigItem *after, KCMenu *m, bool v)
+	ConfigItem(QListView *parent, ConfigItem *after, struct menu *m, bool v)
 	: Parent(parent, after), menu(m), visible(v), goParent(false)
 	{
 		init();
 	}
-	ConfigItem(ConfigItem *parent, ConfigItem *after, KCMenu *m, bool v)
+	ConfigItem(ConfigItem *parent, ConfigItem *after, struct menu *m, bool v)
 	: Parent(parent, after), menu(m), visible(v), goParent(false)
 	{
 		init();
 	}
-	ConfigItem(Q3ListView *parent, ConfigItem *after, bool v)
+	ConfigItem(QListView *parent, ConfigItem *after, bool v)
 	: Parent(parent, after), menu(0), visible(v), goParent(true)
 	{
 		init();
@@ -201,7 +192,7 @@ public:
 	void paintCell(QPainter* p, const QColorGroup& cg, int column, int width, int align);
 
 	ConfigItem* nextItem;
-	KCMenu *menu;
+	struct menu *menu;
 	bool visible;
 	bool goParent;
 };
@@ -222,9 +213,9 @@ public:
 	ConfigItem *item;
 };
 
-class ConfigView : public Q3VBox {
+class ConfigView : public QVBox {
 	Q_OBJECT
-	typedef class Q3VBox Parent;
+	typedef class QVBox Parent;
 public:
 	ConfigView(QWidget* parent, const char *name = 0);
 	~ConfigView(void);
@@ -253,22 +244,22 @@ public:
 	ConfigView* nextView;
 };
 
-class ConfigInfoView : public Q3TextBrowser {
+class ConfigInfoView : public QTextBrowser {
 	Q_OBJECT
-	typedef class Q3TextBrowser Parent;
+	typedef class QTextBrowser Parent;
 public:
 	ConfigInfoView(QWidget* parent, const char *name = 0);
 	bool showDebug(void) const { return _showDebug; }
 
 public slots:
-	void setInfo(KCMenu *menu);
+	void setInfo(struct menu *menu);
 	void saveSettings(void);
 	void setSource(const QString& name);
 	void setShowDebug(bool);
 
 signals:
 	void showDebugChanged(bool);
-	void menuSelected(KCMenu *);
+	void menuSelected(struct menu *);
 
 protected:
 	void symbolInfo(void);
@@ -276,11 +267,11 @@ protected:
 	QString debug_info(struct symbol *sym);
 	static QString print_filter(const QString &str);
 	static void expr_print_help(void *data, struct symbol *sym, const char *str);
-	Q3PopupMenu* createPopupMenu(const QPoint& pos);
+	QPopupMenu* createPopupMenu(const QPoint& pos);
 	void contentsContextMenuEvent(QContextMenuEvent *e);
 
 	struct symbol *sym;
-	KCMenu *menu;
+	struct menu *menu;
 	bool _showDebug;
 };
 
@@ -304,7 +295,7 @@ protected:
 	struct symbol **result;
 };
 
-class ConfigMainWindow : public Q3MainWindow {
+class ConfigMainWindow : public QMainWindow {
 	Q_OBJECT
 
 	static QAction *saveAction;
@@ -312,8 +303,8 @@ class ConfigMainWindow : public Q3MainWindow {
 public:
 	ConfigMainWindow(void);
 public slots:
-	void changeMenu(KCMenu *);
-	void setMenuLink(KCMenu *);
+	void changeMenu(struct menu *);
+	void setMenuLink(struct menu *);
 	void listFocusChanged(void);
 	void goBack(void);
 	void loadConfig(void);
@@ -336,7 +327,7 @@ protected:
 	ConfigView *configView;
 	ConfigList *configList;
 	ConfigInfoView *helpText;
-	Q3ToolBar *toolBar;
+	QToolBar *toolBar;
 	QAction *backAction;
 	QSplitter* split1;
 	QSplitter* split2;
