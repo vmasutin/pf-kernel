@@ -609,7 +609,7 @@ static int sh_cmt_setup(struct sh_cmt_priv *p, struct platform_device *pdev)
 	p->irqaction.name = cfg->name;
 	p->irqaction.handler = sh_cmt_interrupt;
 	p->irqaction.dev_id = p;
-	p->irqaction.flags = IRQF_DISABLED | IRQF_TIMER | IRQF_IRQPOLL;
+	p->irqaction.flags = IRQF_DISABLED | IRQF_TIMER;
 
 	/* get hold of clock */
 	p->clk = clk_get(&p->pdev->dev, cfg->clk);
