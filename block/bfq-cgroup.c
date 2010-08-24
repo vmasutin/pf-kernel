@@ -6,6 +6,8 @@
  *
  * Copyright (C) 2008 Fabio Checconi <fabio@gandalf.sssup.it>
  *		      Paolo Valente <paolo.valente@unimore.it>
+ *
+ * Licensed under the GPL-2 as detailed in the accompanying COPYING.BFQ file.
  */
 
 #ifdef CONFIG_CGROUP_BFQIO
@@ -763,5 +765,3 @@ static struct bfq_group *bfq_alloc_root_group(struct bfq_data *bfqd, int node)
 		bfqg->sched_data.service_tree[i] = BFQ_SERVICE_TREE_INIT;
 
 	return bfqg;
-}
-#endif

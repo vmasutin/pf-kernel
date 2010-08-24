@@ -7,6 +7,8 @@
  * Copyright (C) 2008 Fabio Checconi <fabio@gandalf.sssup.it>
  *		      Paolo Valente <paolo.valente@unimore.it>
  *
+ * Licensed under the GPL-2 as detailed in the accompanying COPYING.BFQ file.
+ *
  * BFQ is a proportional share disk scheduling algorithm based on the
  * slice-by-slice service scheme of CFQ. But BFQ assigns budgets,
  * measured in number of sectors, to tasks instead of time slices.
@@ -2308,5 +2310,3 @@ module_init(bfq_init);
 module_exit(bfq_exit);
 
 MODULE_AUTHOR("Fabio Checconi, Paolo Valente");
-MODULE_LICENSE("GPL");
-MODULE_DESCRIPTION("Budget Fair Queueing IO scheduler");
