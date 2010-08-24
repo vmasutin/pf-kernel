@@ -765,3 +765,6 @@ static struct bfq_group *bfq_alloc_root_group(struct bfq_data *bfqd, int node)
 		bfqg->sched_data.service_tree[i] = BFQ_SERVICE_TREE_INIT;
 
 	return bfqg;
+}
+#endif
+
