@@ -13,12 +13,6 @@ struct nf_queue_entry {
 	struct net_device	*indev;
 	struct net_device	*outdev;
 	int			(*okfn)(struct sk_buff *);
-
-#if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
-	int			(*next_outfn)(struct nf_queue_entry *entry,
-					      unsigned int queuenum);
-	unsigned int		next_queuenum;
-#endif
 };
 
 #define nf_queue_entry_reroute(x) ((void *)x + sizeof(struct nf_queue_entry))

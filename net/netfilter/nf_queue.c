@@ -31,7 +31,7 @@ void nf_register_queue_imq_handler(const struct nf_queue_handler *qh)
 	rcu_assign_pointer(queue_imq_handler, qh);
 	mutex_unlock(&queue_handler_mutex);
 }
-EXPORT_SYMBOL(nf_register_queue_imq_handler);
+EXPORT_SYMBOL_GPL(nf_register_queue_imq_handler);
 
 void nf_unregister_queue_imq_handler(void)
 {
@@ -39,7 +39,8 @@ void nf_unregister_queue_imq_handler(void)
 	rcu_assign_pointer(queue_imq_handler, NULL);
 	mutex_unlock(&queue_handler_mutex);
 }
-EXPORT_SYMBOL(nf_unregister_queue_imq_handler);
+EXPORT_SYMBOL_GPL(nf_unregister_queue_imq_handler);
+
 #endif
 
 /* return EBUSY when somebody else is registered, return EEXIST if the
@@ -134,7 +135,8 @@ static int __nf_queue(struct sk_buff *skb,
 		      struct net_device *indev,
 		      struct net_device *outdev,
 		      int (*okfn)(struct sk_buff *),
-		      unsigned int queuenum)
+		      unsigned int queuenum,
+		      bool imq_queue)
 {
 	int status;
 	struct nf_queue_entry *entry = NULL;
@@ -144,26 +146,17 @@ static int __nf_queue(struct sk_buff *skb,
 #endif
 	const struct nf_afinfo *afinfo;
 	const struct nf_queue_handler *qh;
-#if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
-	const struct nf_queue_handler *qih = NULL;
-#endif
 
 	/* QUEUE == DROP if noone is waiting, to be safe. */
 	rcu_read_lock();
 
-	qh = rcu_dereference(queue_handler[pf]);
 #if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
-	if (pf == PF_INET || pf == PF_INET6)
-#else
-	if (pf == PF_INET)
+	if (imq_queue)
+		qh = rcu_dereference(queue_imq_handler);
+	else
 #endif
-		qih = rcu_dereference(queue_imq_handler);
-
-	if (!qh && !qih)
-#else /* !IMQ */
+	qh = rcu_dereference(queue_handler[pf]);
 	if (!qh)
-#endif
 		goto err_unlock;
 
 	afinfo = nf_get_afinfo(pf);
@@ -182,10 +175,6 @@ static int __nf_queue(struct sk_buff *skb,
 		.indev	= indev,
 		.outdev	= outdev,
 		.okfn	= okfn,
-#if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
-		.next_outfn = qh ? qh->outfn : NULL,
-		.next_queuenum = queuenum,
-#endif
 	};
 
 	/* If it's going away, ignore hook. */
@@ -212,19 +201,8 @@ static int __nf_queue(struct sk_buff *skb,
 #endif
 	skb_dst_force(skb);
 	afinfo->saveroute(skb, entry);
-
-#if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
-	if (qih) {
-		status = qih->outfn(entry, queuenum);
-		goto imq_skip_queue;
-	}
-#endif
-
 	status = qh->outfn(entry, queuenum);
 
-#if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
-imq_skip_queue:
-#endif
 	rcu_read_unlock();
 
 	if (status < 0) {
@@ -242,19 +220,20 @@ err:
 	return 1;
 }
 
-int nf_queue(struct sk_buff *skb,
+static int _nf_queue(struct sk_buff *skb,
 	     struct list_head *elem,
 	     u_int8_t pf, unsigned int hook,
 	     struct net_device *indev,
 	     struct net_device *outdev,
 	     int (*okfn)(struct sk_buff *),
-	     unsigned int queuenum)
+	     unsigned int queuenum,
+	     bool imq_queue)
 {
 	struct sk_buff *segs;
 
 	if (!skb_is_gso(skb))
 		return __nf_queue(skb, elem, pf, hook, indev, outdev, okfn,
-				  queuenum);
+				  queuenum, imq_queue);
 
 	switch (pf) {
 	case NFPROTO_IPV4:
@@ -275,12 +254,38 @@ int nf_queue(struct sk_buff *skb,
 
 		segs->next = NULL;
 		if (!__nf_queue(segs, elem, pf, hook, indev, outdev, okfn,
-				queuenum))
+				queuenum, imq_queue))
 			kfree_skb(segs);
 		segs = nskb;
 	} while (segs);
 	return 1;
 }
+
+int nf_queue(struct sk_buff *skb,
+	     struct list_head *elem,
+	     u_int8_t pf, unsigned int hook,
+	     struct net_device *indev,
+	     struct net_device *outdev,
+	     int (*okfn)(struct sk_buff *),
+	     unsigned int queuenum)
+{
+	return _nf_queue(skb, elem, pf, hook, indev, outdev, okfn, queuenum,
+			 false);
+}
+
+#if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
+int nf_imq_queue(struct sk_buff *skb,
+	     struct list_head *elem,
+	     u_int8_t pf, unsigned int hook,
+	     struct net_device *indev,
+	     struct net_device *outdev,
+	     int (*okfn)(struct sk_buff *),
+	     unsigned int queuenum)
+{
+	return _nf_queue(skb, elem, pf, hook, indev, outdev, okfn, queuenum,
+			 true);
+}
+#endif
 
 void nf_reinject(struct nf_queue_entry *entry, unsigned int verdict)
 {
@@ -322,7 +327,13 @@ void nf_reinject(struct nf_queue_entry *entry, unsigned int verdict)
 	case NF_QUEUE:
 		if (!__nf_queue(skb, elem, entry->pf, entry->hook,
 				entry->indev, entry->outdev, entry->okfn,
-				verdict >> NF_VERDICT_BITS))
+				verdict >> NF_VERDICT_BITS, false))
+			goto next_hook;
+		break;
+	case NF_IMQ_QUEUE:
+		if (!__nf_queue(skb, elem, entry->pf, entry->hook,
+				entry->indev, entry->outdev, entry->okfn,
+				verdict >> NF_VERDICT_BITS, true))
 			goto next_hook;
 		break;
 	case NF_STOLEN:

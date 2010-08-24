@@ -66,7 +66,8 @@ module_init(imq_init);
 module_exit(imq_fini);
 
 MODULE_AUTHOR("http://www.linuximq.net");
-MODULE_DESCRIPTION("Pseudo-driver for the intermediate queue device. See http://www.linuximq.net/ for more information.");
+MODULE_DESCRIPTION("Pseudo-driver for the intermediate queue device. "
+		   "See http://www.linuximq.net/ for more information.");
 MODULE_LICENSE("GPL");
 MODULE_ALIAS("ipt_IMQ");
 MODULE_ALIAS("ip6t_IMQ");
