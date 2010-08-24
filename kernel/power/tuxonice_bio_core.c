@@ -399,14 +399,17 @@ static int submit(int writing, struct block_device *dev, sector_t first_block,
 	}
 
 
-	if (unlikely(test_action_state(TOI_TEST_BIO))) {
+	/* Still read the header! */
+	if (unlikely(test_action_state(TOI_TEST_BIO) && writing)) {
 		/* Fake having done the hard work */
 		set_bit(BIO_UPTODATE, &bio->bi_flags);
 		toi_end_bio(bio, 0);
 	} else
-		submit_bio(writing | (1 << BIO_RW_SYNCIO) |
-				(1 << BIO_RW_TUXONICE) |
-				(1 << BIO_RW_UNPLUG), bio);
+		submit_bio(writing
+				| (1 << BIO_RW_SYNCIO)
+				| (1 << BIO_RW_TUXONICE)
+				| (1 << BIO_RW_UNPLUG)
+				/* | (1 << BIO_RW_NOIDLE) */, bio);
 
 	return 0;
 }
@@ -1282,13 +1285,13 @@ static int toi_bio_initialise(int starting_cycle)
 
 static unsigned long raw_to_real(unsigned long raw)
 {
-	unsigned long result;
+	unsigned long extra;
 
-	result = raw - (raw * (sizeof(unsigned long) + sizeof(int)) +
+	extra = (raw * (sizeof(unsigned long) + sizeof(int)) +
 		(PAGE_SIZE + sizeof(unsigned long) + sizeof(int) + 1)) /
 		(PAGE_SIZE + sizeof(unsigned long) + sizeof(int));
 
-	return result < 0 ? 0 : result;
+	return raw > extra ? raw - extra : 0;
 }
 
 static unsigned long toi_bio_storage_available(void)
@@ -1306,8 +1309,10 @@ static unsigned long toi_bio_storage_available(void)
 	}
 
 	toi_message(TOI_IO, TOI_VERBOSE, 0, "Total storage available is %lu "
-			"pages.", sum);
-	return raw_to_real(sum - header_pages_reserved);
+			"pages (%d header pages).", sum, header_pages_reserved);
+
+	return sum > header_pages_reserved ?
+		raw_to_real(sum - header_pages_reserved) : 0;
 
 }
 
