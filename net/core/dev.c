@@ -2034,7 +2034,7 @@ static inline u16 dev_cap_txqueue(struct net_device *dev, u16 queue_index)
 	return queue_index;
 }
 
-struct netdev_queue *dev_pick_tx(struct net_device *dev, struct sk_buff *skb)
+static struct netdev_queue *dev_pick_tx(struct net_device *dev, struct sk_buff *skb)
 {
 	int queue_index;
 	struct sock *sk = skb->sk;
@@ -2063,7 +2063,6 @@ struct netdev_queue *dev_pick_tx(struct net_device *dev, struct sk_buff *skb)
 	skb_set_queue_mapping(skb, queue_index);
 	return netdev_get_tx_queue(dev, queue_index);
 }
-EXPORT_SYMBOL(dev_pick_tx);
 
 static inline int __dev_xmit_skb(struct sk_buff *skb, struct Qdisc *q,
 				 struct net_device *dev,

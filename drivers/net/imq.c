@@ -47,7 +47,7 @@
  *             I didn't forget anybody). I apologize again for my lack of time.
  *
  *
- *             2008/06/17 - 2.6.25 - Changed imq.c to use qdisc_run() instead 
+ *             2008/06/17 - 2.6.25 - Changed imq.c to use qdisc_run() instead
  *             of qdisc_restart() and moved qdisc_run() to tasklet to avoid
  *             recursive locking. New initialization routines to fix 'rmmod' not
  *             working anymore. Used code from ifb.c. (Jussi Kivilinna)
@@ -82,8 +82,21 @@
  *             2010/02/25 - (Jussi Kivilinna)
  *              - Port to 2.6.33
  *
- *             2010/08/12 - (Jussi Kivilinna)
+ *             2010/08/15 - (Jussi Kivilinna)
  *              - Port to 2.6.35
+ *              - Simplify hook registration by using nf_register_hooks.
+ *              - nf_reinject doesn't need spinlock around it, therefore remove
+ *                imq_nf_reinject function. Other nf_reinject users protect
+ *                their own data with spinlock. With IMQ however all data is
+ *                needed is stored per skbuff, so no locking is needed.
+ *              - Changed IMQ to use 'separate' NF_IMQ_QUEUE instead of
+ *                NF_QUEUE, this allows working coexistance of IMQ and other
+ *                NF_QUEUE users.
+ *              - Make IMQ multi-queue. Number of IMQ device queues can be
+ *                increased with 'numqueues' module parameters. Default number
+ *                of queues is 1, in other words by default IMQ works as
+ *                single-queue device. Multi-queue selection is based on 
+ *                IFB multi-queue patch by Changli Gao <xiaosuo@gmail.com>.
  *
  *	       Also, many thanks to pablo Sebastian Greco for making the initial
  *	       patch and to those who helped the testing.
@@ -108,66 +121,81 @@
 #include <linux/imq.h>
 #include <net/pkt_sched.h>
 #include <net/netfilter/nf_queue.h>
+#include <net/sock.h>
+#include <linux/ip.h>
+#include <linux/ipv6.h>
+#include <linux/if_vlan.h>
+#include <linux/if_pppox.h>
+#include <net/ip.h>
+#include <net/ipv6.h>
+
+static int imq_nf_queue(struct nf_queue_entry *entry, unsigned queue_num);
 
 static nf_hookfn imq_nf_hook;
 
-static struct nf_hook_ops imq_ingress_ipv4 = {
-	.hook		= imq_nf_hook,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_INET_PRE_ROUTING,
+static struct nf_hook_ops imq_ops[] = {
+	{
+	/* imq_ingress_ipv4 */
+		.hook		= imq_nf_hook,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_INET_PRE_ROUTING,
 #if defined(CONFIG_IMQ_BEHAVIOR_BA) || defined(CONFIG_IMQ_BEHAVIOR_BB)
-	.priority	= NF_IP_PRI_MANGLE + 1
+		.priority	= NF_IP_PRI_MANGLE + 1,
 #else
-	.priority	= NF_IP_PRI_NAT_DST + 1
+		.priority	= NF_IP_PRI_NAT_DST + 1,
 #endif
-};
-
-static struct nf_hook_ops imq_egress_ipv4 = {
-	.hook		= imq_nf_hook,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET,
-	.hooknum	= NF_INET_POST_ROUTING,
+	},
+	{
+	/* imq_egress_ipv4 */
+		.hook		= imq_nf_hook,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET,
+		.hooknum	= NF_INET_POST_ROUTING,
 #if defined(CONFIG_IMQ_BEHAVIOR_AA) || defined(CONFIG_IMQ_BEHAVIOR_BA)
-	.priority	= NF_IP_PRI_LAST
+		.priority	= NF_IP_PRI_LAST,
 #else
-	.priority	= NF_IP_PRI_NAT_SRC - 1
+		.priority	= NF_IP_PRI_NAT_SRC - 1,
 #endif
-};
-
+	},
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
-static struct nf_hook_ops imq_ingress_ipv6 = {
-	.hook		= imq_nf_hook,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET6,
-	.hooknum	= NF_INET_PRE_ROUTING,
+	{
+	/* imq_ingress_ipv6 */
+		.hook		= imq_nf_hook,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET6,
+		.hooknum	= NF_INET_PRE_ROUTING,
 #if defined(CONFIG_IMQ_BEHAVIOR_BA) || defined(CONFIG_IMQ_BEHAVIOR_BB)
-	.priority	= NF_IP6_PRI_MANGLE + 1
+		.priority	= NF_IP6_PRI_MANGLE + 1,
 #else
-	.priority	= NF_IP6_PRI_NAT_DST + 1
+		.priority	= NF_IP6_PRI_NAT_DST + 1,
 #endif
-};
-
-static struct nf_hook_ops imq_egress_ipv6 = {
-	.hook		= imq_nf_hook,
-	.owner		= THIS_MODULE,
-	.pf		= PF_INET6,
-	.hooknum	= NF_INET_POST_ROUTING,
+	},
+	{
+	/* imq_egress_ipv6 */
+		.hook		= imq_nf_hook,
+		.owner		= THIS_MODULE,
+		.pf		= PF_INET6,
+		.hooknum	= NF_INET_POST_ROUTING,
 #if defined(CONFIG_IMQ_BEHAVIOR_AA) || defined(CONFIG_IMQ_BEHAVIOR_BA)
-	.priority	= NF_IP6_PRI_LAST
+		.priority	= NF_IP6_PRI_LAST,
 #else
-	.priority	= NF_IP6_PRI_NAT_SRC - 1
+		.priority	= NF_IP6_PRI_NAT_SRC - 1,
+#endif
+	},
 #endif
 };
-#endif
 
 #if defined(CONFIG_IMQ_NUM_DEVS)
-static unsigned int numdevs = CONFIG_IMQ_NUM_DEVS;
+static int numdevs = CONFIG_IMQ_NUM_DEVS;
 #else
-static unsigned int numdevs = IMQ_MAX_DEVS;
+static int numdevs = IMQ_MAX_DEVS;
 #endif
 
-static DEFINE_SPINLOCK(imq_nf_queue_lock);
+#define IMQ_MAX_QUEUES 32
+static int numqueues = 1;
+
+/*static DEFINE_SPINLOCK(imq_nf_queue_lock);*/
 
 static struct net_device *imq_devs_cache[IMQ_MAX_DEVS];
 
@@ -190,49 +218,6 @@ static void imq_skb_destructor(struct sk_buff *skb)
 	}
 
 	skb_restore_cb(skb); /* kfree backup */
-}
-
-/* locking not needed when called from imq_nf_queue */
-static void imq_nf_reinject_lockless(struct nf_queue_entry *entry,
-						unsigned int verdict)
-{
-	int status;
-
-	if (!entry->next_outfn) {
-		nf_reinject(entry, verdict);
-		return;
-	}
-
-	status = entry->next_outfn(entry, entry->next_queuenum);
-	if (status < 0) {
-		nf_queue_entry_release_refs(entry);
-		kfree_skb(entry->skb);
-		kfree(entry);
-	}
-}
-
-static void imq_nf_reinject(struct nf_queue_entry *entry, unsigned int verdict)
-{
-	int status;
-
-	if (!entry->next_outfn) {
-		spin_lock_bh(&imq_nf_queue_lock);
-		nf_reinject(entry, verdict);
-		spin_unlock_bh(&imq_nf_queue_lock);
-		return;
-	}
-
-	rcu_read_lock();
-	local_bh_disable();
-	status = entry->next_outfn(entry, entry->next_queuenum);
-	local_bh_enable();
-	if (status < 0) {
-		nf_queue_entry_release_refs(entry);
-		kfree_skb(entry->skb);
-		kfree(entry);
-	}
-
-	rcu_read_unlock();
 }
 
 static netdev_tx_t imq_dev_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -274,9 +259,175 @@ static netdev_tx_t imq_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 	skb->imq_flags = 0;
 	skb->destructor = NULL;
 
-	imq_nf_reinject(entry, NF_ACCEPT);
+	nf_reinject(entry, NF_ACCEPT);
 
 	return NETDEV_TX_OK;
+}
+
+static u32 imq_hashrnd;
+
+static inline __be16 pppoe_proto(const struct sk_buff *skb)
+{
+	return *((__be16 *)(skb_mac_header(skb) + ETH_HLEN +
+			sizeof(struct pppoe_hdr)));
+}
+
+static u16 imq_hash(struct net_device *dev, struct sk_buff *skb)
+{
+	unsigned int pull_len;
+	u16 protocol = skb->protocol;
+	u32 addr1, addr2;
+	u32 hash, ihl = 0;
+	union {
+		u16 in16[2];
+		u32 in32;
+	} ports;
+	u8 ip_proto;
+
+	pull_len = 0;
+
+recheck:
+	switch (protocol) {
+	case htons(ETH_P_8021Q): {
+		if (unlikely(skb_pull(skb, VLAN_HLEN) == NULL))
+			goto other;
+
+		pull_len += VLAN_HLEN;
+		skb->network_header += VLAN_HLEN;
+
+		protocol = vlan_eth_hdr(skb)->h_vlan_encapsulated_proto;
+		goto recheck;
+	}
+
+	case htons(ETH_P_PPP_SES): {
+		if (unlikely(skb_pull(skb, PPPOE_SES_HLEN) == NULL))
+			goto other;
+
+		pull_len += PPPOE_SES_HLEN;
+		skb->network_header += PPPOE_SES_HLEN;
+
+		protocol = pppoe_proto(skb);
+		goto recheck;
+	}
+
+	case htons(ETH_P_IP): {
+		const struct iphdr *iph = ip_hdr(skb);
+
+		if (unlikely(!pskb_may_pull(skb, sizeof(struct iphdr))))
+			goto other;
+
+		addr1 = iph->daddr;
+		addr2 = iph->saddr;
+
+		ip_proto = !(ip_hdr(skb)->frag_off & htons(IP_MF | IP_OFFSET)) ?
+				 iph->protocol : 0;
+		ihl = ip_hdrlen(skb);
+
+		break;
+	}
+#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
+	case htons(ETH_P_IPV6): {
+		const struct ipv6hdr *iph = ipv6_hdr(skb);
+
+		if (unlikely(!pskb_may_pull(skb, sizeof(struct ipv6hdr))))
+			goto other;
+
+		addr1 = iph->daddr.s6_addr32[3];
+		addr2 = iph->saddr.s6_addr32[3];
+		ihl = ipv6_skip_exthdr(skb, sizeof(struct ipv6hdr), &ip_proto);
+		if (unlikely(ihl < 0))
+			goto other;
+
+		break;
+	}
+#endif
+	default:
+other:
+		if (pull_len != 0) {
+			skb_push(skb, pull_len);
+			skb->network_header -= pull_len;
+		}
+
+		return (u16)(ntohs(protocol) % dev->real_num_tx_queues);
+	}
+
+	if (addr1 > addr2)
+		swap(addr1, addr2);
+
+	switch (ip_proto) {
+	case IPPROTO_TCP:
+	case IPPROTO_UDP:
+	case IPPROTO_DCCP:
+	case IPPROTO_ESP:
+	case IPPROTO_AH:
+	case IPPROTO_SCTP:
+	case IPPROTO_UDPLITE: {
+		if (likely(skb_copy_bits(skb, ihl, &ports.in32, 4) >= 0)) {
+			if (ports.in16[0] > ports.in16[1])
+				swap(ports.in16[0], ports.in16[1]);
+			break;
+		}
+		/* fall-through */
+	}
+	default:
+		ports.in32 = 0;
+		break;
+	}
+
+	if (pull_len != 0) {
+		skb_push(skb, pull_len);
+		skb->network_header -= pull_len;
+	}
+
+	hash = jhash_3words(addr1, addr2, ports.in32, imq_hashrnd ^ ip_proto);
+
+	return (u16)(((u64)hash * dev->real_num_tx_queues) >> 32);
+}
+
+static inline bool sk_tx_queue_recorded(struct sock *sk)
+{
+	return (sk_tx_queue_get(sk) >= 0);
+}
+
+static struct netdev_queue *imq_select_queue(struct net_device *dev,
+						struct sk_buff *skb)
+{
+	u16 queue_index = 0;
+	u32 hash;
+
+	if (likely(dev->real_num_tx_queues == 1))
+		goto out;
+
+	/* IMQ can be receiving ingress or engress packets. */
+
+	/* Check first for if rx_queue is set */
+	if (skb_rx_queue_recorded(skb)) {
+		queue_index = skb_get_rx_queue(skb);
+		goto out;
+	}
+
+	/* Check if socket has tx_queue set */
+	if (sk_tx_queue_recorded(skb->sk)) {
+		queue_index = sk_tx_queue_get(skb->sk);
+		goto out;
+	}
+
+	/* Try use socket hash */
+	if (skb->sk && skb->sk->sk_hash) {
+		hash = skb->sk->sk_hash;
+		queue_index =
+			(u16)(((u64)hash * dev->real_num_tx_queues) >> 32);
+		goto out;
+	}
+
+	/* Generate hash from packet data */
+	queue_index = imq_hash(dev, skb);
+
+out:
+	if (unlikely(queue_index >= dev->real_num_tx_queues))
+		queue_index = (u16)((u32)queue_index % dev->real_num_tx_queues);
+
+	return netdev_get_tx_queue(dev, queue_index);
 }
 
 static int imq_nf_queue(struct nf_queue_entry *entry, unsigned queue_num)
@@ -285,6 +436,7 @@ static int imq_nf_queue(struct nf_queue_entry *entry, unsigned queue_num)
 	struct sk_buff *skb_orig, *skb, *skb_shared;
 	struct Qdisc *q;
 	struct netdev_queue *txq;
+	spinlock_t *root_lock;
 	int users, index;
 	int retval = -EINVAL;
 
@@ -306,7 +458,7 @@ static int imq_nf_queue(struct nf_queue_entry *entry, unsigned queue_num)
 		/* get device by name and cache result */
 		snprintf(buf, sizeof(buf), "imq%d", index);
 		dev = dev_get_by_name(&init_net, buf);
-		if (!dev) {
+		if (unlikely(!dev)) {
 			/* not found ?!*/
 			BUG();
 			retval = -ENODEV;
@@ -319,7 +471,7 @@ static int imq_nf_queue(struct nf_queue_entry *entry, unsigned queue_num)
 
 	if (unlikely(!(dev->flags & IFF_UP))) {
 		entry->skb->imq_flags = 0;
-		imq_nf_reinject_lockless(entry, NF_ACCEPT);
+		nf_reinject(entry, NF_ACCEPT);
 		retval = 0;
 		goto out;
 	}
@@ -332,7 +484,7 @@ static int imq_nf_queue(struct nf_queue_entry *entry, unsigned queue_num)
 	if (unlikely(skb->destructor)) {
 		skb_orig = skb;
 		skb = skb_clone(skb, GFP_ATOMIC);
-		if (!skb) {
+		if (unlikely(!skb)) {
 			retval = -ENOMEM;
 			goto out;
 		}
@@ -344,13 +496,18 @@ static int imq_nf_queue(struct nf_queue_entry *entry, unsigned queue_num)
 	dev->stats.rx_bytes += skb->len;
 	dev->stats.rx_packets++;
 
-	txq = dev_pick_tx(dev, skb);
+	/* Disables softirqs for lock below */
+	rcu_read_lock_bh();
+
+	/* Multi-queue selection */
+	txq = imq_select_queue(dev, skb);
 
 	q = rcu_dereference(txq->qdisc);
 	if (unlikely(!q->enqueue))
 		goto packet_not_eaten_by_imq_dev;
 
-	spin_lock_bh(qdisc_lock(q));
+	root_lock = qdisc_lock(q);
+	spin_lock(root_lock);
 
 	users = atomic_read(&skb->users);
 
@@ -365,10 +522,11 @@ static int imq_nf_queue(struct nf_queue_entry *entry, unsigned queue_num)
 		skb->destructor = &imq_skb_destructor;
 
 		/* cloned? */
-		if (skb_orig)
+		if (unlikely(skb_orig))
 			kfree_skb(skb_orig); /* free original */
 
-		spin_unlock_bh(qdisc_lock(q));
+		spin_unlock(root_lock);
+		rcu_read_unlock_bh();
 
 		/* schedule qdisc dequeue */
 		__netif_schedule(q);
@@ -381,13 +539,15 @@ static int imq_nf_queue(struct nf_queue_entry *entry, unsigned queue_num)
 		/* qdisc dropped packet and decreased skb reference count of
 		 * skb, so we don't really want to and try refree as that would
 		 * actually destroy the skb. */
-		spin_unlock_bh(qdisc_lock(q));
+		spin_unlock(root_lock);
 		goto packet_not_eaten_by_imq_dev;
 	}
 
 packet_not_eaten_by_imq_dev:
+	rcu_read_unlock_bh();
+
 	/* cloned? restore original */
-	if (skb_orig) {
+	if (unlikely(skb_orig)) {
 		kfree_skb(skb);
 		entry->skb = skb_orig;
 	}
@@ -396,20 +556,12 @@ out:
 	return retval;
 }
 
-static struct nf_queue_handler nfqh = {
-	.name  = "imq",
-	.outfn = imq_nf_queue,
-};
-
 static unsigned int imq_nf_hook(unsigned int hook, struct sk_buff *pskb,
 				const struct net_device *indev,
 				const struct net_device *outdev,
 				int (*okfn)(struct sk_buff *))
 {
-	if (pskb->imq_flags & IMQ_F_ENQUEUE)
-		return NF_QUEUE;
-
-	return NF_ACCEPT;
+	return (pskb->imq_flags & IMQ_F_ENQUEUE) ? NF_IMQ_QUEUE : NF_ACCEPT;
 }
 
 static int imq_close(struct net_device *dev)
@@ -471,43 +623,22 @@ static struct rtnl_link_ops imq_link_ops __read_mostly = {
 	.validate	= imq_validate,
 };
 
+static const struct nf_queue_handler imq_nfqh = {
+	.name  = "imq",
+	.outfn = imq_nf_queue,
+};
+
 static int __init imq_init_hooks(void)
 {
-	int err;
+	int ret;
 
-	nf_register_queue_imq_handler(&nfqh);
+	nf_register_queue_imq_handler(&imq_nfqh);
 
-	err = nf_register_hook(&imq_ingress_ipv4);
-	if (err)
-		goto err1;
+	ret = nf_register_hooks(imq_ops, ARRAY_SIZE(imq_ops));
+	if (ret < 0)
+		nf_unregister_queue_imq_handler();
 
-	err = nf_register_hook(&imq_egress_ipv4);
-	if (err)
-		goto err2;
-
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
-	err = nf_register_hook(&imq_ingress_ipv6);
-	if (err)
-		goto err3;
-
-	err = nf_register_hook(&imq_egress_ipv6);
-	if (err)
-		goto err4;
-#endif
-
-	return 0;
-
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
-err4:
-	nf_unregister_hook(&imq_ingress_ipv6);
-err3:
-	nf_unregister_hook(&imq_egress_ipv4);
-#endif
-err2:
-	nf_unregister_hook(&imq_ingress_ipv4);
-err1:
-	nf_unregister_queue_imq_handler();
-	return err;
+	return ret;
 }
 
 static int __init imq_init_one(int index)
@@ -515,7 +646,7 @@ static int __init imq_init_one(int index)
 	struct net_device *dev;
 	int ret;
 
-	dev = alloc_netdev(0, "imq%d", imq_setup);
+	dev = alloc_netdev_mq(0, "imq%d", imq_setup, numqueues);
 	if (!dev)
 		return -ENOMEM;
 
@@ -543,6 +674,14 @@ static int __init imq_init_devs(void)
 		       IMQ_MAX_DEVS);
 		return -EINVAL;
 	}
+
+	if (numqueues < 1 || numqueues > IMQ_MAX_QUEUES) {
+		printk(KERN_ERR "IMQ: numqueues has to be betweed 1 and %u\n",
+		       IMQ_MAX_QUEUES);
+		return -EINVAL;
+	}
+
+	get_random_bytes(&imq_hashrnd, sizeof(imq_hashrnd));
 
 	rtnl_lock();
 	err = __rtnl_link_register(&imq_link_ops);
@@ -583,7 +722,8 @@ static int __init imq_init_module(void)
 		return err;
 	}
 
-	printk(KERN_INFO "IMQ driver loaded successfully.\n");
+	printk(KERN_INFO "IMQ driver loaded successfully. "
+		"(numdevs = %d, numqueues = %d)\n", numdevs, numqueues);
 
 #if defined(CONFIG_IMQ_BEHAVIOR_BA) || defined(CONFIG_IMQ_BEHAVIOR_BB)
 	printk(KERN_INFO "\tHooking IMQ before NAT on PREROUTING.\n");
@@ -601,13 +741,7 @@ static int __init imq_init_module(void)
 
 static void __exit imq_unhook(void)
 {
-#if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
-	nf_unregister_hook(&imq_ingress_ipv6);
-	nf_unregister_hook(&imq_egress_ipv6);
-#endif
-	nf_unregister_hook(&imq_ingress_ipv4);
-	nf_unregister_hook(&imq_egress_ipv4);
-
+	nf_unregister_hooks(imq_ops, ARRAY_SIZE(imq_ops));
 	nf_unregister_queue_imq_handler();
 }
 
@@ -628,8 +762,10 @@ module_init(imq_init_module);
 module_exit(imq_exit_module);
 
 module_param(numdevs, int, 0);
+module_param(numqueues, int, 0);
 MODULE_PARM_DESC(numdevs, "number of IMQ devices (how many imq* devices will "
 			"be created)");
+MODULE_PARM_DESC(numqueues, "number of queues per IMQ device");
 MODULE_AUTHOR("http://www.linuximq.net");
 MODULE_DESCRIPTION("Pseudo-driver for the intermediate queue device. See "
 			"http://www.linuximq.net/ for more information.");

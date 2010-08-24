@@ -97,9 +97,9 @@ static int sock_pipe_buf_steal(struct pipe_inode_info *pipe,
 #if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
 /* Control buffer save/restore for IMQ devices */
 struct skb_cb_table {
+	char			cb[48] __aligned(8);
 	void			*cb_next;
 	atomic_t		refcnt;
-	char      		cb[48];
 };
 
 static DEFINE_SPINLOCK(skb_cb_store_lock);
@@ -140,9 +140,8 @@ int skb_restore_cb(struct sk_buff *skb)
 
 	spin_lock(&skb_cb_store_lock);
 
-	if (atomic_dec_and_test(&next->refcnt)) {
+	if (atomic_dec_and_test(&next->refcnt))
 		kmem_cache_free(skbuff_cb_store_cache, next);
-	}
 
 	spin_unlock(&skb_cb_store_lock);
 
@@ -474,7 +473,7 @@ static void skb_release_head_state(struct sk_buff *skb)
 #if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
 	/* This should not happen. When it does, avoid memleak by restoring
 	the chain of cb-backups. */
-	while(skb->cb_next != NULL) {
+	while (skb->cb_next != NULL) {
 		if (net_ratelimit())
 			printk(KERN_WARNING "IMQ: kfree_skb: skb->cb_next: "
 				"%08x\n", (unsigned int)skb->cb_next);
