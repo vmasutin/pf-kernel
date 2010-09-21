@@ -21,7 +21,7 @@
 #include "tuxonice_pageflags.h"
 #include "power.h"
 
-#define TOI_CORE_VERSION "3.2-rc1"
+#define TOI_CORE_VERSION "3.2-rc2"
 #define	TOI_HEADER_VERSION 3
 #define MY_BOOT_KERNEL_DATA_VERSION 3
 
@@ -135,6 +135,7 @@ enum {
 	TOI_MEMORY,
 	TOI_PAGEDIR,
 	TOI_COMPRESS,
+	TOI_BIO,
 };
 
 #define set_debug_state(bit) (test_and_set_bit(bit, &toi_bkd.toi_debug_state))
