@@ -66,8 +66,11 @@ enum {
 	TOI_LATE_CPU_HOTPLUG,
 	TOI_GET_MAX_MEM_ALLOCD,
 	TOI_NO_FLUSHER_THREAD,
-	TOI_NO_PS2_IF_UNNEEDED
+	TOI_NO_PS2_IF_UNNEEDED,
+	TOI_POST_RESUME_BREAKPOINT,
 };
+
+extern unsigned long toi_bootflags_mask;
 
 #define clear_action_state(bit) (test_and_clear_bit(bit, &toi_bkd.toi_action))
 
