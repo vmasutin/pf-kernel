@@ -1,7 +1,7 @@
 VERSION = 2
 PATCHLEVEL = 6
 SUBLEVEL = 37
-EXTRAVERSION = .1
+EXTRAVERSION = -pf3
 NAME = Flesh-Eating Bats with Fangs
 
 # *DOCUMENTATION*
@@ -9,10 +9,6 @@ NAME = Flesh-Eating Bats with Fangs
 # More info can be located in ./README
 # Comments in this file are targeted only to the developer, do not
 # expect to learn how to build the kernel reading this file.
-
-CKVERSION = -ck2
-CKNAME = BFS Powered
-EXTRAVERSION := $(EXTRAVERSION)$(CKVERSION)
 
 # Do not:
 # o  use make's built-in rules and variables
