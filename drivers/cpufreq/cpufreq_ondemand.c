@@ -782,7 +782,6 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 
 		mutex_init(&this_dbs_info->timer_mutex);
 		dbs_timer_init(this_dbs_info);
-		cpu_scales(cpu);
 		break;
 
 	case CPUFREQ_GOV_STOP:
@@ -797,7 +796,6 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
 			sysfs_remove_group(cpufreq_global_kobject,
 					   &dbs_attr_group);
 
-		cpu_nonscaling(cpu);
 		break;
 
 	case CPUFREQ_GOV_LIMITS:
