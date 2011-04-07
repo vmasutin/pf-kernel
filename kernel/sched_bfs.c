@@ -857,10 +857,10 @@ static inline void resched_suitable_idle(struct task_struct *p)
 }
 /*
  * Flags to tell us whether this CPU is running a CPU frequency governor that
- * scales its speed or not. No locking required as the very rare wrongly read
- * value would be harmless.
+ * has slowed its speed or not. No locking required as the very rare wrongly
+ * read value would be harmless.
  */
-void cpu_scales(int cpu)
+void cpu_scaling(int cpu)
 {
 	cpu_rq(cpu)->scaling = 1;
 }
@@ -905,7 +905,7 @@ static inline void resched_suitable_idle(struct task_struct *p)
 {
 }
 
-void cpu_scales(int __unused)
+void cpu_scaling(int __unused)
 {
 }
 
@@ -922,7 +922,7 @@ static inline int scaling_rq(struct rq *rq)
 	return 0;
 }
 #endif /* CONFIG_SMP */
-EXPORT_SYMBOL_GPL(cpu_scales);
+EXPORT_SYMBOL_GPL(cpu_scaling);
 EXPORT_SYMBOL_GPL(cpu_nonscaling);
 
 /*
@@ -1052,8 +1052,10 @@ static inline void
 swap_sticky(struct rq *rq, unsigned long cpu, struct task_struct *p)
 {
 	if (rq->sticky_task) {
-		if (rq->sticky_task == p)
+		if (rq->sticky_task == p) {
+			p->sticky = 1;
 			return;
+		}
 		if (rq->sticky_task->sticky) {
 			rq->sticky_task->sticky = 0;
 			resched_closest_idle(rq, cpu, rq->sticky_task);
