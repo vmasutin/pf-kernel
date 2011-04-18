@@ -97,6 +97,10 @@ config PM_SLEEP_SMP
 	select HOTPLUG_CPU
 	default y
 
+config TOI_ZRAM_SUPPORT
+	def_bool y
+	depends on TOI && ZRAM!=n
+
 config PM_SLEEP
 	bool
 	depends on SUSPEND || HIBERNATION || XEN_SAVE_RESTORE
