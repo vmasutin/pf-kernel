@@ -1411,6 +1411,13 @@ no_page_table:
 }
 EXPORT_SYMBOL_GPL(follow_page);
 
+static inline int stack_guard_page(struct vm_area_struct *vma, unsigned long addr)
+{
+	return (vma->vm_flags & VM_GROWSDOWN) &&
+		(vma->vm_start == addr) &&
+		!vma_stack_continue(vma->vm_prev, addr);
+}
+
 int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 		     unsigned long start, int nr_pages, unsigned int gup_flags,
 		     struct page **pages, struct vm_area_struct **vmas,
@@ -1440,7 +1447,6 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 		vma = find_extend_vma(mm, start);
 		if (!vma && in_gate_area(tsk, start)) {
 			unsigned long pg = start & PAGE_MASK;
-			struct vm_area_struct *gate_vma = get_gate_vma(tsk);
 			pgd_t *pgd;
 			pud_t *pud;
 			pmd_t *pmd;
@@ -1465,10 +1471,11 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 				pte_unmap(pte);
 				return i ? : -EFAULT;
 			}
+			vma = get_gate_vma(tsk);
 			if (pages) {
 				struct page *page;
 
-				page = vm_normal_page(gate_vma, start, *pte);
+				page = vm_normal_page(vma, start, *pte);
 				if (!page) {
 					if (!(gup_flags & FOLL_DUMP) &&
 					     is_zero_pfn(pte_pfn(*pte)))
@@ -1482,12 +1489,7 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 				get_page(page);
 			}
 			pte_unmap(pte);
-			if (vmas)
-				vmas[i] = gate_vma;
-			i++;
-			start += PAGE_SIZE;
-			nr_pages--;
-			continue;
+			goto next_page;
 		}
 
 		if (!vma ||
@@ -1500,6 +1502,13 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 					&start, &nr_pages, i, gup_flags);
 			continue;
 		}
+
+		/*
+		 * If we don't actually want the page itself,
+		 * and it's the stack guard page, just skip it.
+		 */
+		if (!pages && stack_guard_page(vma, start))
+			goto next_page;
 
 		do {
 			struct page *page;
@@ -1570,6 +1579,7 @@ int __get_user_pages(struct task_struct *tsk, struct mm_struct *mm,
 				flush_anon_page(vma, page, start);
 				flush_dcache_page(page);
 			}
+next_page:
 			if (vmas)
 				vmas[i] = vma;
 			i++;
