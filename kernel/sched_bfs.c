@@ -1000,16 +1000,6 @@ static inline void deactivate_task(struct task_struct *p)
 	if (task_contributes_to_load(p))
 		grq.nr_uninterruptible++;
 	grq.nr_running--;
-	/*
-	 * If we are going to sleep and we have plugged IO queued, make
-	 * sure to submit it to avoid deadlocks.
-	 * This unlocking looks dangerous to me, -ck...
-	 */
-	if (blk_needs_flush_plug(p)) {
-		raw_spin_unlock(&grq.lock);
-		blk_schedule_flush_plug(p);
-		raw_spin_lock(&grq.lock);
-	}
 }
 
 #ifdef CONFIG_SMP
@@ -3036,18 +3026,11 @@ need_resched:
 	rcu_note_context_switch(cpu);
 	prev = rq->curr;
 
+retry_unplugged:
 	deactivate = 0;
 	schedule_debug(prev);
 
 	grq_lock_irq();
-	update_clocks(rq);
-	update_cpu_clock(rq, prev, 0);
-	if (rq->clock - rq->last_tick > HALF_JIFFY_NS)
-		rq->dither = 0;
-	else
-		rq->dither = 1;
-
-	clear_tsk_need_resched(prev);
 
 	switch_count = &prev->nivcsw;
 	if (prev->state && !(preempt_count() & PREEMPT_ACTIVE)) {
@@ -3076,6 +3059,26 @@ need_resched:
 		}
 		switch_count = &prev->nvcsw;
 	}
+
+	/*
+	 * If we are going to sleep and we have plugged IO queued, make
+	 * sure to submit it to avoid deadlocks.
+	 */
+	if (deactivate && blk_needs_flush_plug(prev)) {
+		grq_unlock();
+		blk_schedule_flush_plug(prev);
+		local_irq_enable();
+		goto retry_unplugged;
+	}
+
+	update_clocks(rq);
+	update_cpu_clock(rq, prev, 0);
+	if (rq->clock - rq->last_tick > HALF_JIFFY_NS)
+		rq->dither = 0;
+	else
+		rq->dither = 1;
+
+	clear_tsk_need_resched(prev);
 
 	if (prev != idle) {
 		/* Update all the information stored on struct rq */
