@@ -6755,6 +6755,9 @@ void md_do_sync(mddev_t *mddev)
 		mddev->curr_resync = 2;
 
 	try_again:
+		while (freezer_is_on())
+			yield();
+
 		if (kthread_should_stop())
 			set_bit(MD_RECOVERY_INTR, &mddev->recovery);
 
@@ -6777,6 +6780,10 @@ void md_do_sync(mddev_t *mddev)
 					 * time 'round when curr_resync == 2
 					 */
 					continue;
+
+				while (freezer_is_on())
+					yield();
+
 				/* We need to wait 'interruptible' so as not to
 				 * contribute to the load average, and not to
 				 * be caught by 'softlockup'
@@ -6789,6 +6796,7 @@ void md_do_sync(mddev_t *mddev)
 					       " share one or more physical units)\n",
 					       desc, mdname(mddev), mdname(mddev2));
 					mddev_put(mddev2);
+					try_to_freeze();
 					if (signal_pending(current))
 						flush_signals(current);
 					schedule();
@@ -6896,6 +6904,9 @@ void md_do_sync(mddev_t *mddev)
 						 || kthread_should_stop());
 		}
 
+		while (freezer_is_on())
+			yield();
+
 		if (kthread_should_stop())
 			goto interrupted;
 
@@ -6939,6 +6950,9 @@ void md_do_sync(mddev_t *mddev)
 			mark_cnt[next] = io_sectors - atomic_read(&mddev->recovery_active);
 			last_mark = next;
 		}
+
+		while (freezer_is_on())
+			yield();
 
 
 		if (kthread_should_stop())
@@ -7142,6 +7156,9 @@ static void reap_sync_thread(mddev_t *mddev)
  */
 void md_check_recovery(mddev_t *mddev)
 {
+	if (unlikely(freezer_is_on()))
+		return;
+
 	if (mddev->bitmap)
 		bitmap_daemon_work(mddev);
 
