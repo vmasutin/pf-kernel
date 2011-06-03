@@ -1228,7 +1228,7 @@ retry_rq:
 		 * if the runqueue has changed and p is actually now
 		 * running somewhere else!
 		 */
-		while (task_running(p) && p == rq->curr) {
+		while (task_running(p)) {
 			if (match_state && unlikely(p->state != match_state))
 				return 0;
 			cpu_relax();
@@ -3026,7 +3026,6 @@ need_resched:
 	rcu_note_context_switch(cpu);
 	prev = rq->curr;
 
-retry_unplugged:
 	deactivate = 0;
 	schedule_debug(prev);
 
@@ -3062,13 +3061,15 @@ retry_unplugged:
 
 	/*
 	 * If we are going to sleep and we have plugged IO queued, make
-	 * sure to submit it to avoid deadlocks.
+	 * sure to submit it to avoid deadlocks. Since we drop the grq lock
+	 * here, we need to make sure we haven't been signalled a wakeup via
+	 * try_to_wake_up and shouldn't deactivate.
 	 */
 	if (deactivate && blk_needs_flush_plug(prev)) {
-		grq_unlock();
+		grq_unlock_irq();
+		preempt_enable_no_resched();
 		blk_schedule_flush_plug(prev);
-		local_irq_enable();
-		goto retry_unplugged;
+		goto need_resched;
 	}
 
 	update_clocks(rq);
