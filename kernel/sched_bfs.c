@@ -1000,16 +1000,6 @@ static inline void deactivate_task(struct task_struct *p)
 	if (task_contributes_to_load(p))
 		grq.nr_uninterruptible++;
 	grq.nr_running--;
-	/*
-	 * If we are going to sleep and we have plugged IO queued, make
-	 * sure to submit it to avoid deadlocks.
-	 * This unlocking looks dangerous to me, -ck...
-	 */
-	if (blk_needs_flush_plug(p)) {
-		raw_spin_unlock(&grq.lock);
-		blk_schedule_flush_plug(p);
-		raw_spin_lock(&grq.lock);
-	}
 }
 
 #ifdef CONFIG_SMP
@@ -1238,7 +1228,7 @@ retry_rq:
 		 * if the runqueue has changed and p is actually now
 		 * running somewhere else!
 		 */
-		while (task_running(p) && p == rq->curr) {
+		while (task_running(p)) {
 			if (match_state && unlikely(p->state != match_state))
 				return 0;
 			cpu_relax();
@@ -3040,14 +3030,6 @@ need_resched:
 	schedule_debug(prev);
 
 	grq_lock_irq();
-	update_clocks(rq);
-	update_cpu_clock(rq, prev, 0);
-	if (rq->clock - rq->last_tick > HALF_JIFFY_NS)
-		rq->dither = 0;
-	else
-		rq->dither = 1;
-
-	clear_tsk_need_resched(prev);
 
 	switch_count = &prev->nivcsw;
 	if (prev->state && !(preempt_count() & PREEMPT_ACTIVE)) {
@@ -3076,6 +3058,28 @@ need_resched:
 		}
 		switch_count = &prev->nvcsw;
 	}
+
+	/*
+	 * If we are going to sleep and we have plugged IO queued, make
+	 * sure to submit it to avoid deadlocks. Since we drop the grq lock
+	 * here, we need to make sure we haven't been signalled a wakeup via
+	 * try_to_wake_up and shouldn't deactivate.
+	 */
+	if (deactivate && blk_needs_flush_plug(prev)) {
+		grq_unlock_irq();
+		preempt_enable_no_resched();
+		blk_schedule_flush_plug(prev);
+		goto need_resched;
+	}
+
+	update_clocks(rq);
+	update_cpu_clock(rq, prev, 0);
+	if (rq->clock - rq->last_tick > HALF_JIFFY_NS)
+		rq->dither = 0;
+	else
+		rq->dither = 1;
+
+	clear_tsk_need_resched(prev);
 
 	if (prev != idle) {
 		/* Update all the information stored on struct rq */
