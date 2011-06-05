@@ -3061,11 +3061,9 @@ need_resched:
 
 	/*
 	 * If we are going to sleep and we have plugged IO queued, make
-	 * sure to submit it to avoid deadlocks. Since we drop the grq lock
-	 * here, we need to make sure we haven't been signalled a wakeup via
-	 * try_to_wake_up and shouldn't deactivate.
+	 * sure to submit it to avoid deadlocks.
 	 */
-	if (deactivate && blk_needs_flush_plug(prev)) {
+	if (unlikely(deactivate && blk_needs_flush_plug(prev))) {
 		grq_unlock_irq();
 		preempt_enable_no_resched();
 		blk_schedule_flush_plug(prev);
