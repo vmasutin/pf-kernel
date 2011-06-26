@@ -808,9 +808,9 @@ static int do_prepare_image(void)
 	     check_still_keeping_image()))
 		return 1;
 
-	if (toi_init(restarting) && !toi_prepare_image() &&
-			!test_result_state(TOI_ABORTED))
-		return 0;
+	if (!toi_init(restarting) || toi_prepare_image() ||
+			test_result_state(TOI_ABORTED))
+		return 1;
 
 	/* 
 	 * ZRAM disks can be marked now as there's no race with userspace
@@ -826,7 +826,7 @@ static int do_prepare_image(void)
 
 	trap_non_toi_io = 1;
 
-	return 1;
+	return 0;
 }
 
 /**
