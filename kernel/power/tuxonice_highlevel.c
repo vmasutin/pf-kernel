@@ -155,7 +155,6 @@ void toi_finish_anything(int hibernate_or_resume)
 	toi_put_modules();
 	if (hibernate_or_resume) {
 		block_dump = block_dump_save;
-		pm_restore_gfp_mask();
 		set_cpus_allowed_ptr(current, cpu_all_mask);
 		toi_alloc_print_debug_stats();
 		atomic_inc(&snapshot_device_available);
@@ -186,8 +185,6 @@ int toi_start_anything(int hibernate_or_resume)
 
 		if (!atomic_add_unless(&snapshot_device_available, -1, 0))
 			goto snapshotdevice_unavailable;
-
-		pm_restrict_gfp_mask();
 	}
 
 	if (hibernate_or_resume == SYSFS_HIBERNATE)
@@ -222,10 +219,8 @@ early_init_err:
 	}
 	toi_put_modules();
 prehibernate_err:
-	if (hibernate_or_resume) {
-		pm_restore_gfp_mask();
+	if (hibernate_or_resume)
 		atomic_inc(&snapshot_device_available);
-	}
 snapshotdevice_unavailable:
 	if (hibernate_or_resume)
 		mutex_unlock(&pm_mutex);
@@ -457,6 +452,9 @@ static void do_cleanup(int get_debug_info, int restarting)
 	clear_toi_state(TOI_BOOT_KERNEL);
 	thaw_processes();
 
+	if (!restarting)
+		toi_stop_other_threads();
+
 	if (test_action_state(TOI_KEEP_IMAGE) &&
 	    !test_result_state(TOI_ABORTED)) {
 		toi_message(TOI_ANY_SECTION, TOI_LOW, 1,
@@ -561,6 +559,11 @@ static int toi_init(int restarting)
 		return 1;
 	}
 	set_toi_state(TOI_NOTIFIERS_PREPARE);
+
+	if (!restarting) {
+		printk(KERN_ERR "Starting other threads.");
+		toi_start_other_threads();
+	}
 
 	result = usermodehelper_disable();
 	if (result) {
@@ -808,9 +811,9 @@ static int do_prepare_image(void)
 	     check_still_keeping_image()))
 		return 1;
 
-	if (toi_init(restarting) && !toi_prepare_image() &&
-			!test_result_state(TOI_ABORTED))
-		return 0;
+	if (!toi_init(restarting) || toi_prepare_image() ||
+			test_result_state(TOI_ABORTED))
+		return 1;
 
 	/* 
 	 * ZRAM disks can be marked now as there's no race with userspace
@@ -826,7 +829,9 @@ static int do_prepare_image(void)
 
 	trap_non_toi_io = 1;
 
-	return 1;
+	pm_restrict_gfp_mask();
+
+	return 0;
 }
 
 /**
@@ -1013,11 +1018,13 @@ void toi_try_resume(void)
 	resume_attempted = 1;
 
 	current->flags |= PF_MEMALLOC;
+	toi_start_other_threads();
 
 	if (do_toi_step(STEP_RESUME_CAN_RESUME) &&
 			!do_toi_step(STEP_RESUME_LOAD_PS1))
 		do_toi_step(STEP_RESUME_DO_RESTORE);
 
+	toi_stop_other_threads();
 	do_cleanup(0, 0);
 
 	current->flags &= ~PF_MEMALLOC;
@@ -1109,6 +1116,7 @@ prepare:
 			printk(KERN_INFO "Automatically adjusting the extra"
 				" pages allowance to %ld and restarting.\n",
 				extra_pd1_pages_allowance);
+			pm_restore_gfp_mask();
 			goto prepare;
 		}
 
@@ -1119,6 +1127,8 @@ prepare:
 	/* This code runs at resume time too! */
 	if (!result && toi_in_hibernate)
 		result = do_toi_step(STEP_HIBERNATE_POWERDOWN);
+
+	pm_restore_gfp_mask();
 out:
 	do_cleanup(1, 0);
 	current->flags &= ~PF_MEMALLOC;
