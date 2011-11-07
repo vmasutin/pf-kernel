@@ -106,8 +106,14 @@ static void __bfq_exit_single_io_context(struct bfq_data *bfqd,
 	 * No write-side locking as no task is using @ioc (they're exited
 	 * or bfqd is being deallocated.
 	 */
-	if (ioc->ioc_data == cic)
+	rcu_read_lock();
+	if (rcu_dereference(ioc->ioc_data) == cic) {
+		rcu_read_unlock();
+		spin_lock(&ioc->lock);
 		rcu_assign_pointer(ioc->ioc_data, NULL);
+		spin_unlock(&ioc->lock);
+	} else
+		rcu_read_unlock();
 
 	if (cic->cfqq[BLK_RW_ASYNC] != NULL) {
 		bfq_exit_bfqq(bfqd, cic->cfqq[BLK_RW_ASYNC]);
@@ -163,7 +169,7 @@ static struct cfq_io_context *bfq_alloc_io_context(struct bfq_data *bfqd,
 	cic = kmem_cache_alloc_node(bfq_ioc_pool, gfp_mask | __GFP_ZERO,
 							bfqd->queue->node);
 	if (cic != NULL) {
-		cic->last_end_request = jiffies;
+		cic->ttime.last_end_request = jiffies;
 		INIT_LIST_HEAD(&cic->queue_list);
 		INIT_HLIST_NODE(&cic->cic_list);
 		cic->dtor = bfq_free_io_context;

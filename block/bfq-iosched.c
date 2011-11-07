@@ -375,7 +375,8 @@ static inline unsigned long bfq_serv_to_charge(struct request *rq,
 					       struct bfq_queue *bfqq)
 {
 	return blk_rq_sectors(rq) *
-		(1 + ((!bfq_bfqq_sync(bfqq)) * bfq_async_charge_factor));
+		(1 + ((!bfq_bfqq_sync(bfqq)) * (bfqq->raising_coeff == 1) *
+		bfq_async_charge_factor));
 }
 
 /**
@@ -422,7 +423,7 @@ static void bfq_add_rq_rb(struct request *rq)
 	struct bfq_queue *bfqq = RQ_BFQQ(rq);
 	struct bfq_entity *entity = &bfqq->entity;
 	struct bfq_data *bfqd = bfqq->bfqd;
-	struct request *__alias, *next_rq, *prev;
+	struct request *next_rq, *prev;
 	unsigned long old_raising_coeff = bfqq->raising_coeff;
 	int idle_for_long_time = bfqq->budget_timeout +
 		bfqd->bfq_raising_min_idle_time < jiffies;
@@ -431,12 +432,7 @@ static void bfq_add_rq_rb(struct request *rq)
 	bfqq->queued[rq_is_sync(rq)]++;
 	bfqd->queued++;
 
-	/*
-	 * Looks a little odd, but the first insert might return an alias,
-	 * if that happens, put the alias on the dispatch list.
-	 */
-	while ((__alias = elv_rb_add(&bfqq->sort_list, rq)) != NULL)
-		bfq_dispatch_insert(bfqd->queue, __alias);
+	elv_rb_add(&bfqq->sort_list, rq);
 
 	/*
 	 * Check if this request is a better next-serve candidate.
@@ -496,8 +492,21 @@ static void bfq_add_rq_rb(struct request *rq)
 			entity->ioprio_changed = 1;
 add_bfqq_busy:
 		bfq_add_bfqq_busy(bfqd, bfqq);
-	} else
-		bfq_updated_next_req(bfqd, bfqq);
+        } else {
+                if(old_raising_coeff == 1 && bfqq->last_rais_start_finish +
+                        bfqd->bfq_raising_min_idle_time < jiffies) {
+                        bfqq->raising_coeff = bfqd->bfq_raising_coeff;
+
+			entity->ioprio_changed = 1;
+			bfq_log_bfqq(bfqd, bfqq,
+				     "non-idle wrais starting at %llu msec,"
+				     "rais_max_time %u",
+				     bfqq->last_rais_start_finish,
+				     jiffies_to_msecs(bfqq->
+					raising_cur_max_time));
+                }
+                bfq_updated_next_req(bfqd, bfqq);
+	}
 
 	if(bfqd->low_latency &&
 		(old_raising_coeff == 1 || bfqq->raising_coeff == 1 ||
@@ -1497,7 +1506,7 @@ static void update_raising_data(struct bfq_data *bfqd, struct bfq_queue *bfqq)
 			bfqq->raising_coeff,
 			bfqq->entity.weight, bfqq->entity.orig_weight);
 
-		BUG_ON(entity->weight !=
+		BUG_ON(bfqq != bfqd->active_queue && entity->weight !=
 			entity->orig_weight * bfqq->raising_coeff);
 		if(entity->ioprio_changed)
 			bfq_log_bfqq(bfqd, bfqq,
@@ -1549,12 +1558,28 @@ static int bfq_dispatch_request(struct bfq_data *bfqd,
 
 	if (service_to_charge > bfq_bfqq_budget_left(bfqq)) {
 		/*
+		 * This may happen if the next rq is chosen
+		 * in fifo order instead of sector order.
+		 * The budget is properly dimensioned
+		 * to be always sufficient to serve the next request
+		 * only if it is chosen in sector order. The reason is
+		 * that it would be quite inefficient and little useful
+		 * to always make sure that the budget is large enough
+		 * to serve even the possible next rq in fifo order.
+		 * In fact, requests are seldom served in fifo order.
+		 *
 		 * Expire the queue for budget exhaustion, and
 		 * make sure that the next act_budget is enough
 		 * to serve the next request, even if it comes
 		 * from the fifo expired path.
 		 */
 		bfqq->next_rq = rq;
+		/*
+		 * Since this dispatch is failed, make sure that
+		 * a new one will be performed
+		 */
+		if (!bfqd->rq_in_driver)
+			bfq_schedule_dispatch(bfqd);
 		goto expire;
 	}
 
@@ -1789,7 +1814,6 @@ static void bfq_init_prio_data(struct bfq_queue *bfqq, struct io_context *ioc)
 	 * elevate the priority of this queue.
 	 */
 	bfqq->org_ioprio = bfqq->entity.new_ioprio;
-	bfqq->org_ioprio_class = bfqq->entity.new_ioprio_class;
 	bfq_clear_bfqq_prio_changed(bfqq);
 }
 
@@ -1961,12 +1985,12 @@ static struct bfq_queue *bfq_get_queue(struct bfq_data *bfqd,
 static void bfq_update_io_thinktime(struct bfq_data *bfqd,
 				    struct cfq_io_context *cic)
 {
-	unsigned long elapsed = jiffies - cic->last_end_request;
+	unsigned long elapsed = jiffies - cic->ttime.last_end_request;
 	unsigned long ttime = min(elapsed, 2UL * bfqd->bfq_slice_idle);
 
-	cic->ttime_samples = (7*cic->ttime_samples + 256) / 8;
-	cic->ttime_total = (7*cic->ttime_total + 256*ttime) / 8;
-	cic->ttime_mean = (cic->ttime_total + 128) / cic->ttime_samples;
+	cic->ttime.ttime_samples = (7*cic->ttime.ttime_samples + 256) / 8;
+	cic->ttime.ttime_total = (7*cic->ttime.ttime_total + 256*ttime) / 8;
+	cic->ttime.ttime_mean = (cic->ttime.ttime_total + 128) / cic->ttime.ttime_samples;
 }
 
 static void bfq_update_io_seektime(struct bfq_data *bfqd,
@@ -2036,8 +2060,8 @@ static void bfq_update_idle_window(struct bfq_data *bfqd,
 		(bfqd->hw_tag && BFQQ_SEEKY(bfqq) &&
 			bfqq->raising_coeff == 1))
 		enable_idle = 0;
-	else if (bfq_sample_valid(cic->ttime_samples)) {
-		if (cic->ttime_mean > bfqd->bfq_slice_idle &&
+	else if (bfq_sample_valid(cic->ttime.ttime_samples)) {
+		if (cic->ttime.ttime_mean > bfqd->bfq_slice_idle &&
 			bfqq->raising_coeff == 1)
 			enable_idle = 0;
 		else
@@ -2175,7 +2199,7 @@ static void bfq_completed_request(struct request_queue *q, struct request *rq)
 		bfqd->sync_flight--;
 
 	if (sync)
-		RQ_CIC(rq)->last_end_request = jiffies;
+		RQ_CIC(rq)->ttime.last_end_request = jiffies;
 
 	/*
 	 * If this is the active queue, check if it needs to be expired,
@@ -2210,30 +2234,6 @@ static void bfq_completed_request(struct request_queue *q, struct request *rq)
 		bfq_schedule_dispatch(bfqd);
 }
 
-/*
- * We temporarily boost lower priority queues if they are holding fs exclusive
- * resources.  They are boosted to normal prio (CLASS_BE/4).
- */
-static void bfq_prio_boost(struct bfq_queue *bfqq)
-{
-	if (has_fs_excl()) {
-		/*
-		 * Boost idle prio on transactions that would lock out other
-		 * users of the filesystem
-		 */
-		if (bfq_class_idle(bfqq))
-			bfqq->entity.new_ioprio_class = IOPRIO_CLASS_BE;
-		if (bfqq->entity.new_ioprio > IOPRIO_NORM)
-			bfqq->entity.new_ioprio = IOPRIO_NORM;
-	} else {
-		/*
-		 * Unboost the queue (if needed)
-		 */
-		bfqq->entity.new_ioprio_class = bfqq->org_ioprio_class;
-		bfqq->entity.new_ioprio = bfqq->org_ioprio;
-	}
-}
-
 static inline int __bfq_may_queue(struct bfq_queue *bfqq)
 {
 	if (bfq_bfqq_wait_request(bfqq) && bfq_bfqq_must_alloc(bfqq)) {
@@ -2264,7 +2264,6 @@ static int bfq_may_queue(struct request_queue *q, int rw)
 	bfqq = cic_to_bfqq(cic, rw_is_sync(rw));
 	if (bfqq != NULL) {
 		bfq_init_prio_data(bfqq, cic->ioc);
-		bfq_prio_boost(bfqq);
 
 		return __bfq_may_queue(bfqq);
 	}
