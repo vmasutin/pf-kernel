@@ -147,7 +147,7 @@ int toi_get_pageset1_load_addresses(void)
 		    *low_pbe_page, *last_low_pbe_page = NULL;
 	struct pbe **last_high_pbe_ptr = &restore_highmem_pblist,
 		   *this_high_pbe = NULL;
-	int orig_low_pfn, orig_high_pfn;
+	unsigned long orig_low_pfn, orig_high_pfn;
 	int high_pbes_done = 0, low_pbes_done = 0;
 	int low_direct = 0, high_direct = 0, result = 0, i;
 	int high_page = 1, high_offset = 0, low_page = 1, low_offset = 0;
@@ -252,7 +252,7 @@ int toi_get_pageset1_load_addresses(void)
 			this_high_pbe->orig_address = (void *) orig_high_pfn;
 			this_high_pbe->address = page;
 			this_high_pbe->next = NULL;
-			toi_message(TOI_PAGEDIR, TOI_VERBOSE, 0, "High pbe %d/%d: %p(%d)=>%p",
+			toi_message(TOI_PAGEDIR, TOI_VERBOSE, 0, "High pbe %d/%d: %p(%ld)=>%p",
 					high_page, high_offset, page, orig_high_pfn, orig_page);
 			if (last_high_pbe_page != high_pbe_page) {
 				*last_high_pbe_ptr =

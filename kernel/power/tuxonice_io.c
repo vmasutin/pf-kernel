@@ -698,7 +698,7 @@ top:
 	toi_message(TOI_IO, TOI_VERBOSE, 0, "%d workers left.", atomic_read(&toi_io_workers));
 	mutex_unlock(&io_mutex);
 
-	if ((int) data && toi_worker_command != TOI_IO_WORKER_EXIT) {
+	if ((unsigned long) data && toi_worker_command != TOI_IO_WORKER_EXIT) {
 		/* Were we the last thread and we're using a flusher thread? */
 		if (last_worker && using_flusher) {
 			toiActiveAllocator->finish_all_io();
@@ -722,7 +722,8 @@ top:
 
 int toi_start_other_threads(void)
 {
-	int cpu, num_started = 0;
+	int cpu;
+  unsigned long num_started = 0;
 	struct task_struct *p;
 	int to_start = (toi_max_workers ? toi_max_workers : num_online_cpus()) - 1;
 
