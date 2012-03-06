@@ -1094,8 +1094,10 @@ static struct dentry *d_inode_lookup(struct dentry *parent, struct dentry *dentr
 	struct dentry *old;
 
 	/* Don't create child dentry for a dead directory. */
-	if (unlikely(IS_DEADDIR(inode)))
+	if (unlikely(IS_DEADDIR(inode))) {
+		dput(dentry);
 		return ERR_PTR(-ENOENT);
+	}
 
 	old = inode->i_op->lookup(inode, dentry, nd);
 	if (unlikely(old)) {
@@ -2723,6 +2725,8 @@ int vfs_unlink(struct inode *dir, struct dentry *dentry)
 
 	if (!dir->i_op->unlink)
 		return -EPERM;
+
+	vfs_check_frozen(dir->i_sb, SB_FREEZE_WRITE);
 
 	mutex_lock(&dentry->d_inode->i_mutex);
 	if (d_mountpoint(dentry))

@@ -6258,7 +6258,7 @@ F:	arch/alpha/kernel/srm_env.c
 
 STABLE BRANCH
 M:	Greg Kroah-Hartman <greg@kroah.com>
-L:	stable@kernel.org
+L:	stable@vger.kernel.org
 S:	Maintained
 
 STAGING SUBSYSTEM
@@ -6682,6 +6682,13 @@ M:	"Maciej W. Rozycki" <macro@linux-mips.org>
 S:	Maintained
 F:	drivers/tc/
 F:	include/linux/tc.h
+
+TUXONICE (ENHANCED HIBERNATION)
+P:	Nigel Cunningham
+M:	nigel@tuxonice.net
+L:	tuxonice-devel@tuxonice.net
+W:	http://tuxonice.net
+S:	Maintained
 
 U14-34F SCSI DRIVER
 M:	Dario Ballabio <ballabio_dario@emc.com>

@@ -51,6 +51,7 @@ extern void refrigerator(void);
 extern int freeze_processes(void);
 extern int freeze_kernel_threads(void);
 extern void thaw_processes(void);
+extern void thaw_kernel_threads(void);
 
 static inline int try_to_freeze(void)
 {
@@ -125,6 +126,19 @@ static inline void set_freezable(void)
 	current->flags &= ~PF_NOFREEZE;
 }
 
+extern int freezer_state;
+#define FREEZER_OFF 0
+#define FREEZER_FILESYSTEMS_FROZEN 1
+#define FREEZER_USERSPACE_FROZEN 2
+#define FREEZER_FULLY_ON 3
+
+static inline int freezer_is_on(void)
+{
+	return freezer_state == FREEZER_FULLY_ON;
+}
+
+extern void thaw_kernel_threads(void);
+
 /*
  * Tell the freezer that the current task should be frozen by it and that it
  * should send a fake signal to the task to freeze it.
@@ -185,8 +199,11 @@ static inline void refrigerator(void) {}
 static inline int freeze_processes(void) { return -ENOSYS; }
 static inline int freeze_kernel_threads(void) { return -ENOSYS; }
 static inline void thaw_processes(void) {}
+static inline void thaw_kernel_threads(void) {}
 
 static inline int try_to_freeze(void) { return 0; }
+static inline int freezer_is_on(void) { return 0; }
+static inline void thaw_kernel_threads(void) { }
 
 static inline void freezer_do_not_count(void) {}
 static inline void freezer_count(void) {}

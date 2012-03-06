@@ -12,6 +12,7 @@
 #include <linux/suspend.h>
 #include <linux/syscalls.h>
 #include <linux/reboot.h>
+#include <linux/export.h>
 #include <linux/kmod.h>
 #include <linux/string.h>
 #include <linux/device.h>
@@ -65,6 +66,7 @@ static struct snapshot_data {
 } snapshot_state;
 
 atomic_t snapshot_device_available = ATOMIC_INIT(1);
+EXPORT_SYMBOL_GPL(snapshot_device_available);
 
 static int snapshot_open(struct inode *inode, struct file *filp)
 {
@@ -283,10 +285,17 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 		}
 		pm_restore_gfp_mask();
 		error = hibernation_snapshot(data->platform_support);
-		if (!error)
+		if (error) {
+			thaw_kernel_threads();
+		} else {
 			error = put_user(in_suspend, (int __user *)arg);
-		if (!error)
-			data->ready = 1;
+			if (!error && !freezer_test_done)
+				data->ready = 1;
+			if (freezer_test_done) {
+				freezer_test_done = false;
+				thaw_kernel_threads();
+			}
+		}
 		break;
 
 	case SNAPSHOT_ATOMIC_RESTORE:
@@ -303,6 +312,15 @@ static long snapshot_ioctl(struct file *filp, unsigned int cmd,
 		swsusp_free();
 		memset(&data->handle, 0, sizeof(struct snapshot_handle));
 		data->ready = 0;
+		/*
+		 * It is necessary to thaw kernel threads here, because
+		 * SNAPSHOT_CREATE_IMAGE may be invoked directly after
+		 * SNAPSHOT_FREE.  In that case, if kernel threads were not
+		 * thawed, the preallocation of memory carried out by
+		 * hibernation_snapshot() might run into problems (i.e. it
+		 * might fail or even deadlock).
+		 */
+		thaw_kernel_threads();
 		break;
 
 	case SNAPSHOT_SET_IMAGE_SIZE:
