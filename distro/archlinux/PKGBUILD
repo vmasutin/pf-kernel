@@ -1,6 +1,6 @@
 pkgname=kernel32-pf
-basekernel=3.2.6
-pkgver=3.2.6
+basekernel=3.2.7
+pkgver=3.2.7
 pkgrel=pf
 pkgdesc="The Linux Kernel and modules"
 arch=('i686' 'x86_64')
