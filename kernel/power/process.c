@@ -238,14 +238,12 @@ EXPORT_SYMBOL_GPL(thaw_processes);
 void thaw_kernel_threads(void)
 {
 	freezer_state = FREEZER_USERSPACE_FROZEN;
-	printk(KERN_INFO "Restarting normal filesystems.\n");
+	printk("Restarting kernel threads ... ");
 	thaw_filesystems(FS_FREEZER_NORMAL);
 	thaw_workqueues();
 	thaw_tasks(true);
+	schedule();
+	printk("done.\n");
 }
 
-/*
- * It's ugly putting this EXPORT down here, but it's necessary so that it
- * doesn't matter whether the fs-freezing patch is applied or not.
- */
 EXPORT_SYMBOL_GPL(thaw_kernel_threads);
