@@ -592,6 +592,7 @@ void dpm_resume(pm_message_t state)
 	async_synchronize_full();
 	dpm_show_time(starttime, state, NULL);
 }
+EXPORT_SYMBOL_GPL(dpm_resume);
 
 /**
  * device_complete - Complete a PM transition for given device.
@@ -663,6 +664,7 @@ void dpm_complete(pm_message_t state)
 	list_splice(&list, &dpm_list);
 	mutex_unlock(&dpm_list_mtx);
 }
+EXPORT_SYMBOL_GPL(dpm_complete);
 
 /**
  * dpm_resume_end - Execute "resume" callbacks and complete system transition.
@@ -969,6 +971,7 @@ int dpm_suspend(pm_message_t state)
 		dpm_show_time(starttime, state, NULL);
 	return error;
 }
+EXPORT_SYMBOL_GPL(dpm_suspend);
 
 /**
  * device_prepare - Prepare a device for system power transition.
@@ -1059,6 +1062,7 @@ int dpm_prepare(pm_message_t state)
 	mutex_unlock(&dpm_list_mtx);
 	return error;
 }
+EXPORT_SYMBOL_GPL(dpm_prepare);
 
 /**
  * dpm_suspend_start - Prepare devices for PM transition and suspend them.
