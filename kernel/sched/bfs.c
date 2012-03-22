@@ -133,7 +133,7 @@
 
 void print_scheduler_version(void)
 {
-	printk(KERN_INFO"BFS CPU scheduler v0.417 by Con Kolivas.\n");
+	printk(KERN_INFO "BFS CPU scheduler v0.420 by Con Kolivas.\n");
 }
 
 /*
@@ -899,6 +899,11 @@ static inline bool scaling_rq(struct rq *rq)
 {
 	return rq->scaling;
 }
+
+static inline int locality_diff(struct task_struct *p, struct rq *rq)
+{
+	return rq->cpu_locality[task_cpu(p)];
+}
 #else /* CONFIG_SMP */
 static inline void inc_qnr(void)
 {
@@ -945,6 +950,11 @@ void cpu_nonscaling(int __unused)
 static inline bool scaling_rq(struct rq *rq)
 {
 	return false;
+}
+
+static inline int locality_diff(struct task_struct *p, struct rq *rq)
+{
+	return 0;
 }
 #endif /* CONFIG_SMP */
 EXPORT_SYMBOL_GPL(cpu_scaling);
@@ -1410,7 +1420,7 @@ static inline bool needs_other_cpu(struct task_struct *p, int cpu)
  */
 static void try_preempt(struct task_struct *p, struct rq *this_rq)
 {
-	struct rq *highest_prio_rq;
+	struct rq *highest_prio_rq = NULL;
 	int cpu, highest_prio;
 	u64 latest_deadline;
 	cpumask_t tmp;
@@ -1427,7 +1437,7 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 		return;
 	}
 
-	/* IDLEPRIO tasks never preempt anything */
+	/* IDLEPRIO tasks never preempt anything but idle */
 	if (p->policy == SCHED_IDLEPRIO)
 		return;
 
@@ -1436,9 +1446,7 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 	else
 		return;
 
-	highest_prio = p->prio;
-	highest_prio_rq = this_rq;
-	latest_deadline = this_rq->rq_deadline;
+	highest_prio = latest_deadline = 0;
 
 	for_each_cpu_mask(cpu, tmp) {
 		struct rq *rq;
@@ -1457,10 +1465,10 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 		}
 	}
 
-	if (!can_preempt(p, highest_prio, highest_prio_rq->rq_deadline))
-		return;
-
-	resched_task(highest_prio_rq->curr);
+	if (likely(highest_prio_rq)) {
+		if (can_preempt(p, highest_prio, highest_prio_rq->rq_deadline))
+			resched_task(highest_prio_rq->curr);
+	}
 }
 #else /* CONFIG_SMP */
 static inline bool needs_other_cpu(struct task_struct *p, int cpu)
@@ -2286,13 +2294,15 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 static void irqtime_account_hi_si(void)
 {
 	u64 *cpustat = kcpustat_this_cpu->cpustat;
-	u64 latest_cputime;
+	u64 latest_ns;
 
-	latest_cputime = nsecs_to_cputime(this_cpu_read(cpu_hardirq_time));
-	cpustat[CPUTIME_IRQ] += (__force u64)latest_cputime;
+	latest_ns = nsecs_to_cputime64(this_cpu_read(cpu_hardirq_time));
+	if (latest_ns > cpustat[CPUTIME_IRQ])
+		cpustat[CPUTIME_IRQ] += (__force u64)cputime_one_jiffy;
 
-	latest_cputime = nsecs_to_cputime(this_cpu_read(cpu_softirq_time));
-	cpustat[CPUTIME_SOFTIRQ] += (__force u64)latest_cputime;
+	latest_ns = nsecs_to_cputime64(this_cpu_read(cpu_softirq_time));
+	if (latest_ns > cpustat[CPUTIME_SOFTIRQ])
+		cpustat[CPUTIME_SOFTIRQ] += (__force u64)cputime_one_jiffy;
 }
 #else /* CONFIG_IRQ_TIME_ACCOUNTING */
 
@@ -2943,6 +2953,55 @@ static inline void check_deadline(struct task_struct *p)
 		time_slice_expired(p);
 }
 
+#define BITOP_WORD(nr)		((nr) / BITS_PER_LONG)
+
+/*
+ * Scheduler queue bitmap specific find next bit.
+ */
+static inline unsigned long
+next_sched_bit(const unsigned long *addr, unsigned long offset)
+{
+	const unsigned long *p;
+	unsigned long result;
+	unsigned long size;
+	unsigned long tmp;
+
+	size = PRIO_LIMIT;
+	if (offset >= size)
+		return size;
+
+	p = addr + BITOP_WORD(offset);
+	result = offset & ~(BITS_PER_LONG-1);
+	size -= result;
+	offset %= BITS_PER_LONG;
+	if (offset) {
+		tmp = *(p++);
+		tmp &= (~0UL << offset);
+		if (size < BITS_PER_LONG)
+			goto found_first;
+		if (tmp)
+			goto found_middle;
+		size -= BITS_PER_LONG;
+		result += BITS_PER_LONG;
+	}
+	while (size & ~(BITS_PER_LONG-1)) {
+		if ((tmp = *(p++)))
+			goto found_middle;
+		result += BITS_PER_LONG;
+		size -= BITS_PER_LONG;
+	}
+	if (!size)
+		return result;
+	tmp = *p;
+
+found_first:
+	tmp &= (~0UL >> (BITS_PER_LONG - size));
+	if (tmp == 0UL)		/* Are any bits set? */
+		return result + size;	/* Nope. */
+found_middle:
+	return result + __ffs(tmp);
+}
+
 /*
  * O(n) lookup of all tasks in the global runqueue. The real brainfuck
  * of lock contention and O(n). It's not really O(n) as only the queued,
@@ -2964,69 +3023,70 @@ static inline void check_deadline(struct task_struct *p)
 static inline struct
 task_struct *earliest_deadline_task(struct rq *rq, int cpu, struct task_struct *idle)
 {
-	u64 dl, uninitialized_var(earliest_deadline);
-	struct task_struct *p, *edt = idle;
-	struct list_head *queue;
-	int idx = 0;
+	struct task_struct *edt = NULL;
+	unsigned long idx = -1;
 
-retry:
-	idx = find_next_bit(grq.prio_bitmap, PRIO_LIMIT, idx);
-	if (idx >= PRIO_LIMIT)
-		goto out;
-	queue = grq.queue + idx;
+	do {
+		struct list_head *queue;
+		struct task_struct *p;
+		u64 earliest_deadline;
 
-	if (idx < MAX_RT_PRIO) {
-		/* We found an rt task */
-		list_for_each_entry(p, queue, run_list) {
-			/* Make sure cpu affinity is ok */
-			if (needs_other_cpu(p, cpu))
-				continue;
-			edt = p;
-			goto out_take;
-		}
-		/* None of the RT tasks at this priority can run on this cpu */
-		++idx;
-		goto retry;
-	}
+		idx = next_sched_bit(grq.prio_bitmap, ++idx);
+		if (idx >= PRIO_LIMIT)
+			return idle;
+		queue = grq.queue + idx;
 
-	list_for_each_entry(p, queue, run_list) {
-		/* Make sure cpu affinity is ok */
-		if (needs_other_cpu(p, cpu))
+		if (idx < MAX_RT_PRIO) {
+			/* We found an rt task */
+			list_for_each_entry(p, queue, run_list) {
+				/* Make sure cpu affinity is ok */
+				if (needs_other_cpu(p, cpu))
+					continue;
+				edt = p;
+				goto out_take;
+			}
+			/*
+			 * None of the RT tasks at this priority can run on
+			 * this cpu
+			 */
 			continue;
-
-		/*
-		 * Soft affinity happens here by not scheduling a task with
-		 * its sticky flag set that ran on a different CPU last when
-		 * the CPU is scaling, or by greatly biasing against its
-		 * deadline when not.
-		 */
-		if (task_rq(p) != rq && task_sticky(p)) {
-			if (scaling_rq(rq))
-				continue;
-			else
-				dl = p->deadline + longest_deadline_diff();
-		} else
-			dl = p->deadline;
+		}
 
 		/*
 		 * No rt tasks. Find the earliest deadline task. Now we're in
-		 * O(n) territory. This is what we silenced the compiler for
-		 * with uninitialized_var(): edt will always start as idle.
+		 * O(n) territory.
 		 */
-		if (edt == idle ||
-		    deadline_before(dl, earliest_deadline)) {
-			earliest_deadline = dl;
-			edt = p;
+		earliest_deadline = ~0ULL;
+		list_for_each_entry(p, queue, run_list) {
+			u64 dl;
+
+			/* Make sure cpu affinity is ok */
+			if (needs_other_cpu(p, cpu))
+				continue;
+
+			/*
+			 * Soft affinity happens here by not scheduling a task
+			 * with its sticky flag set that ran on a different CPU
+			 * last when the CPU is scaling, or by greatly biasing
+			 * against its deadline when not, based on cpu cache
+			 * locality.
+			 */
+			if (task_sticky(p) && task_rq(p) != rq) {
+				if (scaling_rq(rq))
+					continue;
+				dl = p->deadline << locality_diff(p, rq);
+			} else
+				dl = p->deadline;
+
+			if (deadline_before(dl, earliest_deadline)) {
+				earliest_deadline = dl;
+				edt = p;
+			}
 		}
-	}
-	if (edt == idle) {
-		if (++idx < PRIO_LIMIT)
-			goto retry;
-		goto out;
-	}
+	} while (!edt);
+
 out_take:
 	take_task(cpu, edt);
-out:
 	return edt;
 }
 
@@ -5021,9 +5081,9 @@ void wake_up_idle_cpu(int cpu)
  */
 int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 {
+	bool running_wrong = false;
+	bool queued = false;
 	unsigned long flags;
-	int running_wrong = 0;
-	int queued = 0;
 	struct rq *rq;
 	int ret = 0;
 
@@ -5054,7 +5114,7 @@ int set_cpus_allowed_ptr(struct task_struct *p, const struct cpumask *new_mask)
 		/* Task is running on the wrong cpu now, reschedule it. */
 		if (rq == this_rq()) {
 			set_tsk_need_resched(p);
-			running_wrong = 1;
+			running_wrong = true;
 		} else
 			resched_task(p);
 	} else
