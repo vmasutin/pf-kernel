@@ -2344,8 +2344,10 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	unsigned long writeback_threshold;
 	bool aborted_reclaim;
 
-  if (unlikely(pm_freezing))
-    return 0;
+#ifdef CONFIG_FREEZER
+	if (unlikely(pm_freezing))
+		return 0;
+#endif
 
 	get_mems_allowed();
 	delayacct_freepages_start();
@@ -3116,8 +3118,10 @@ void wakeup_kswapd(struct zone *zone, int order, enum zone_type classzone_idx)
 	if (!populated_zone(zone))
 		return;
 
+#ifdef CONFIG_FREEZER
 	if (pm_freezing)
 		return;
+#endif
 
 	if (!cpuset_zone_allowed_hardwall(zone, GFP_KERNEL))
 		return;
