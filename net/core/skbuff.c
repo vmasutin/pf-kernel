@@ -532,8 +532,10 @@ static void skb_release_head_state(struct sk_buff *skb)
 		skb->destructor(skb);
 	}
 #if defined(CONFIG_IMQ) || defined(CONFIG_IMQ_MODULE)
-	/* This should not happen. When it does, avoid memleak by restoring
-	the chain of cb-backups. */
+	/*
+	 * This should not happen. When it does, avoid memleak by restoring
+	 * the chain of cb-backups.
+	 */
 	while (skb->cb_next != NULL) {
 		if (net_ratelimit())
 			printk(KERN_WARNING "IMQ: kfree_skb: skb->cb_next: "
@@ -541,7 +543,8 @@ static void skb_release_head_state(struct sk_buff *skb)
 
 		skb_restore_cb(skb);
 	}
-	/* This should not happen either, nf_queue_entry is nullified in
+	/*
+	 * This should not happen either, nf_queue_entry is nullified in
 	 * imq_dev_xmit(). If we have non-NULL nf_queue_entry then we are
 	 * leaking entry pointers, maybe memory. We don't know if this is
 	 * pointer to already freed memory, or should this be freed.
@@ -549,7 +552,7 @@ static void skb_release_head_state(struct sk_buff *skb)
 	 */
 	if (skb->nf_queue_entry && net_ratelimit())
 		printk(KERN_WARNING
-				"IMQ: kfree_skb: skb->nf_queue_entry != NULL");
+			"IMQ: kfree_skb: skb->nf_queue_entry != NULL");
 #endif
 #if IS_ENABLED(CONFIG_NF_CONNTRACK)
 	nf_conntrack_put(skb->nfct);

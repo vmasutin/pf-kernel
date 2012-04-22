@@ -121,6 +121,12 @@
  *              - Clean-up, move 'get imq device pointer by imqX name' to
  *                separate function from imq_nf_queue().
  *
+ *             2012/01/05 - Jussi Kivilinna <jussi.kivilinna@mbnet.fi>
+ *              - Port to 3.2
+ *
+ *             2012/03/19 - Jussi Kivilinna <jussi.kivilinna@mbnet.fi>
+ *              - Port to 3.3
+ *
  *	       Also, many thanks to pablo Sebastian Greco for making the initial
  *	       patch and to those who helped the testing.
  *
@@ -283,13 +289,14 @@ recheck:
 #if defined(CONFIG_IPV6) || defined(CONFIG_IPV6_MODULE)
 	case htons(ETH_P_IPV6): {
 		const struct ipv6hdr *iph = ipv6_hdr(skb);
-		__be16 frag_off;
+		__be16 fo = 0;
+
 		if (unlikely(!pskb_may_pull(skb, sizeof(struct ipv6hdr))))
 			goto other;
 
 		addr1 = iph->daddr.s6_addr32[3];
 		addr2 = iph->saddr.s6_addr32[3];
-		ihl = ipv6_skip_exthdr(skb, sizeof(struct ipv6hdr), &ip_proto, &frag_off);
+		ihl = ipv6_skip_exthdr(skb, sizeof(struct ipv6hdr), &ip_proto, &fo);
 		if (unlikely(ihl < 0))
 			goto other;
 
