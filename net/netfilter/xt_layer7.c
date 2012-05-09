@@ -414,7 +414,7 @@ static int layer7_write_proc(struct file* file, const char* buffer,
 
 static bool
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
-match(const struct sk_buff *skbin, struct xt_action_param *par)
+match(const struct sk_buff *skbin, const struct xt_match_param *par)
 #else
 match(const struct sk_buff *skbin,
       const struct net_device *in,
@@ -576,21 +576,31 @@ match(const struct sk_buff *skbin,
 }
 
 // load nf_conntrack_ipv4
-static int check(const struct xt_mtchk_param *par)
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
+static bool check(const struct xt_mtchk_param *par)
 {
-        if (nf_ct_l3proto_try_module_get(par->family) < 0) {
-                pr_info("can't load conntrack support for "
-                                    "proto=%d\n", par->family);
-                return -EINVAL;
+        if (nf_ct_l3proto_try_module_get(par->match->family) < 0) {
+                printk(KERN_WARNING "can't load conntrack support for "
+                                    "proto=%d\n", par->match->family);
+#else
+static bool check(const char *tablename, const void *inf,
+		 const struct xt_match *match, void *matchinfo,
+		 unsigned int hook_mask)
+{
+        if (nf_ct_l3proto_try_module_get(match->family) < 0) {
+                printk(KERN_WARNING "can't load conntrack support for "
+                                    "proto=%d\n", match->family);
+#endif
+                return 0;
         }
-	return 0;
+	return 1;
 }
 
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 28)
 	static void destroy(const struct xt_mtdtor_param *par)
 	{
-		nf_ct_l3proto_module_put(par->family);
+		nf_ct_l3proto_module_put(par->match->family);
 	}
 #else
 	static void destroy(const struct xt_match *match, void *matchinfo)
