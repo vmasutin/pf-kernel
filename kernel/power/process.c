@@ -188,6 +188,7 @@ int freeze_kernel_threads(void)
 
 	return error;
 }
+EXPORT_SYMBOL_GPL(freeze_kernel_threads);
 
 static void thaw_tasks(bool nosig_only)
 {

@@ -40,6 +40,7 @@ EXPORT_SYMBOL_GPL(resume_file);
 dev_t swsusp_resume_device;
 sector_t swsusp_resume_block;
 int in_suspend __nosavedata;
+EXPORT_SYMBOL_GPL(in_suspend);
 
 enum {
 	HIBERNATION_INVALID,
