@@ -84,6 +84,8 @@
 #include <linux/fs_struct.h>
 #include <linux/slab.h>
 #include <linux/flex_array.h>
+#include <linux/vs_context.h>
+#include <linux/vs_network.h>
 #ifdef CONFIG_HARDWALL
 #include <asm/hardwall.h>
 #endif
@@ -937,10 +939,15 @@ static ssize_t oom_adjust_write(struct file *file, const char __user *buf,
 		goto err_task_lock;
 	}
 
-	if (oom_adjust < task->signal->oom_adj && !capable(CAP_SYS_RESOURCE)) {
+	if (oom_adjust < task->signal->oom_adj &&
+		!vx_capable(CAP_SYS_RESOURCE, VXC_OOM_ADJUST)) {
 		err = -EACCES;
 		goto err_sighand;
 	}
+
+	/* prevent guest processes from circumventing the oom killer */
+	if (vx_current_xid() && (oom_adjust == OOM_DISABLE))
+		oom_adjust = OOM_ADJUST_MIN;
 
 	/*
 	 * Warn that /proc/pid/oom_adj is deprecated, see
@@ -1541,6 +1548,8 @@ struct inode *proc_pid_make_inode(struct super_block * sb, struct task_struct *t
 		inode->i_gid = cred->egid;
 		rcu_read_unlock();
 	}
+	/* procfs is xid tagged */
+	inode->i_tag = (tag_t)vx_task_xid(task);
 	security_task_to_inode(task, inode);
 
 out:
@@ -1586,6 +1595,8 @@ int pid_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat)
 
 /* dentry stuff */
 
+static unsigned name_to_int(struct dentry *dentry);
+
 /*
  *	Exceptional case: normally we are not allowed to unhash a busy
  * directory. In this case, however, we can do it - no aliasing problems
@@ -1614,6 +1625,12 @@ int pid_revalidate(struct dentry *dentry, struct nameidata *nd)
 	task = get_proc_task(inode);
 
 	if (task) {
+		unsigned pid = name_to_int(dentry);
+
+		if (pid != ~0U && pid != vx_map_pid(task->pid)) {
+			put_task_struct(task);
+			goto drop;
+		}
 		if ((inode->i_mode == (S_IFDIR|S_IRUGO|S_IXUGO)) ||
 		    task_dumpable(task)) {
 			rcu_read_lock();
@@ -1630,6 +1647,7 @@ int pid_revalidate(struct dentry *dentry, struct nameidata *nd)
 		put_task_struct(task);
 		return 1;
 	}
+drop:
 	d_drop(dentry);
 	return 0;
 }
@@ -2449,6 +2467,13 @@ static struct dentry *proc_pident_lookup(struct inode *dir,
 	if (!task)
 		goto out_no_task;
 
+	/* TODO: maybe we can come up with a generic approach? */
+	if (task_vx_flags(task, VXF_HIDE_VINFO, 0) &&
+		(dentry->d_name.len == 5) &&
+		(!memcmp(dentry->d_name.name, "vinfo", 5) ||
+		!memcmp(dentry->d_name.name, "ninfo", 5)))
+		goto out;
+
 	/*
 	 * Yes, it does not scale. And it should not. Don't add
 	 * new entries into /proc/<tgid>/ without very good reasons.
@@ -2834,7 +2859,7 @@ out_iput:
 static struct dentry *proc_base_lookup(struct inode *dir, struct dentry *dentry)
 {
 	struct dentry *error;
-	struct task_struct *task = get_proc_task(dir);
+	struct task_struct *task = get_proc_task_real(dir);
 	const struct pid_entry *p, *last;
 
 	error = ERR_PTR(-ENOENT);
@@ -2941,6 +2966,9 @@ static int proc_pid_personality(struct seq_file *m, struct pid_namespace *ns,
 static const struct file_operations proc_task_operations;
 static const struct inode_operations proc_task_inode_operations;
 
+extern int proc_pid_vx_info(struct task_struct *, char *);
+extern int proc_pid_nx_info(struct task_struct *, char *);
+
 static const struct pid_entry tgid_base_stuff[] = {
 	DIR("task",       S_IRUGO|S_IXUGO, proc_task_inode_operations, proc_task_operations),
 	DIR("fd",         S_IRUSR|S_IXUSR, proc_fd_inode_operations, proc_fd_operations),
@@ -3007,6 +3035,8 @@ static const struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_CGROUPS
 	REG("cgroup",  S_IRUGO, proc_cgroup_operations),
 #endif
+	INF("vinfo",      S_IRUGO, proc_pid_vx_info),
+	INF("ninfo",	  S_IRUGO, proc_pid_nx_info),
 	INF("oom_score",  S_IRUGO, proc_oom_score),
 	REG("oom_adj",    S_IRUGO|S_IWUSR, proc_oom_adjust_operations),
 	REG("oom_score_adj", S_IRUGO|S_IWUSR, proc_oom_score_adj_operations),
@@ -3026,6 +3056,7 @@ static const struct pid_entry tgid_base_stuff[] = {
 #ifdef CONFIG_HARDWALL
 	INF("hardwall",   S_IRUGO, proc_pid_hardwall),
 #endif
+	ONE("nsproxy",	S_IRUGO, proc_pid_nsproxy),
 };
 
 static int proc_tgid_base_readdir(struct file * filp,
@@ -3219,7 +3250,7 @@ retry:
 	iter.task = NULL;
 	pid = find_ge_pid(iter.tgid, ns);
 	if (pid) {
-		iter.tgid = pid_nr_ns(pid, ns);
+		iter.tgid = pid_unmapped_nr_ns(pid, ns);
 		iter.task = pid_task(pid, PIDTYPE_PID);
 		/* What we to know is if the pid we have find is the
 		 * pid of a thread_group_leader.  Testing for task
@@ -3249,7 +3280,7 @@ static int proc_pid_fill_cache(struct file *filp, void *dirent, filldir_t filldi
 	struct tgid_iter iter)
 {
 	char name[PROC_NUMBUF];
-	int len = snprintf(name, sizeof(name), "%d", iter.tgid);
+	int len = snprintf(name, sizeof(name), "%d", vx_map_tgid(iter.tgid));
 	return proc_fill_cache(filp, dirent, filldir, name, len,
 				proc_pid_instantiate, iter.task, NULL);
 }
@@ -3273,7 +3304,7 @@ int proc_pid_readdir(struct file * filp, void * dirent, filldir_t filldir)
 		goto out_no_task;
 	nr = filp->f_pos - FIRST_PROCESS_ENTRY;
 
-	reaper = get_proc_task(filp->f_path.dentry->d_inode);
+	reaper = get_proc_task_real(filp->f_path.dentry->d_inode);
 	if (!reaper)
 		goto out_no_task;
 
@@ -3295,6 +3326,8 @@ int proc_pid_readdir(struct file * filp, void * dirent, filldir_t filldir)
 			__filldir = fake_filldir;
 
 		filp->f_pos = iter.tgid + TGID_OFFSET;
+		if (!vx_proc_task_visible(iter.task))
+			continue;
 		if (proc_pid_fill_cache(filp, dirent, __filldir, iter) < 0) {
 			put_task_struct(iter.task);
 			goto out;
@@ -3447,6 +3480,8 @@ static struct dentry *proc_task_lookup(struct inode *dir, struct dentry * dentry
 
 	tid = name_to_int(dentry);
 	if (tid == ~0U)
+		goto out;
+	if (vx_current_initpid(tid))
 		goto out;
 
 	ns = dentry->d_sb->s_fs_info;

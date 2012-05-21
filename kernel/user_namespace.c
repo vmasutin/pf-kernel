@@ -11,6 +11,7 @@
 #include <linux/user_namespace.h>
 #include <linux/highuid.h>
 #include <linux/cred.h>
+#include <linux/vserver/global.h>
 
 static struct kmem_cache *user_ns_cachep __read_mostly;
 
@@ -33,6 +34,7 @@ int create_user_ns(struct cred *new)
 		return -ENOMEM;
 
 	kref_init(&ns->kref);
+	atomic_inc(&vs_global_user_ns);
 
 	for (n = 0; n < UIDHASH_SZ; ++n)
 		INIT_HLIST_HEAD(ns->uidhash_table + n);
@@ -81,6 +83,8 @@ void free_user_ns(struct kref *kref)
 	struct user_namespace *ns =
 		container_of(kref, struct user_namespace, kref);
 
+	/* FIXME: maybe move into destroyer? */
+	atomic_dec(&vs_global_user_ns);
 	INIT_WORK(&ns->destroyer, free_user_ns_work);
 	schedule_work(&ns->destroyer);
 }

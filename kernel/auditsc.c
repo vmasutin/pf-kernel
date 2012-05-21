@@ -2308,7 +2308,7 @@ int audit_set_loginuid(uid_t loginuid)
 	if (task->loginuid != -1)
 		return -EPERM;
 #else /* CONFIG_AUDIT_LOGINUID_IMMUTABLE */
-	if (!capable(CAP_AUDIT_CONTROL))
+	if (!vx_capable(CAP_AUDIT_CONTROL, VXC_AUDIT_CONTROL))
 		return -EPERM;
 #endif  /* CONFIG_AUDIT_LOGINUID_IMMUTABLE */
 

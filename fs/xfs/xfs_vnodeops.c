@@ -106,6 +106,77 @@ xfs_readlink_bmap(
 	return error;
 }
 
+
+STATIC void
+xfs_get_inode_flags(
+	xfs_inode_t	*ip)
+{
+	struct inode 	*inode = VFS_I(ip);
+	unsigned int 	flags = inode->i_flags;
+	unsigned int 	vflags = inode->i_vflags;
+
+	if (flags & S_IMMUTABLE)
+		ip->i_d.di_flags |= XFS_DIFLAG_IMMUTABLE;
+	else
+		ip->i_d.di_flags &= ~XFS_DIFLAG_IMMUTABLE;
+	if (flags & S_IXUNLINK)
+		ip->i_d.di_flags |= XFS_DIFLAG_IXUNLINK;
+	else
+		ip->i_d.di_flags &= ~XFS_DIFLAG_IXUNLINK;
+
+	if (vflags & V_BARRIER)
+		ip->i_d.di_vflags |= XFS_DIVFLAG_BARRIER;
+	else
+		ip->i_d.di_vflags &= ~XFS_DIVFLAG_BARRIER;
+	if (vflags & V_COW)
+		ip->i_d.di_vflags |= XFS_DIVFLAG_COW;
+	else
+		ip->i_d.di_vflags &= ~XFS_DIVFLAG_COW;
+}
+
+int
+xfs_sync_flags(
+	struct inode		*inode,
+	int			flags,
+	int			vflags)
+{
+	struct xfs_inode	*ip = XFS_I(inode);
+	struct xfs_mount	*mp = ip->i_mount;
+	struct xfs_trans        *tp;
+	unsigned int		lock_flags = 0;
+	int			code;
+
+	tp = xfs_trans_alloc(mp, XFS_TRANS_SETATTR_NOT_SIZE);
+	code = xfs_trans_reserve(tp, 0, XFS_ICHANGE_LOG_RES(mp), 0, 0, 0);
+	if (code)
+		goto error_out;
+
+	xfs_ilock(ip, XFS_ILOCK_EXCL);
+	xfs_trans_ijoin(tp, ip, 0);
+
+	inode->i_flags = flags;
+	inode->i_vflags = vflags;
+	xfs_get_inode_flags(ip);
+
+	xfs_trans_log_inode(tp, ip, XFS_ILOG_CORE);
+	xfs_trans_ichgtime(tp, ip, XFS_ICHGTIME_CHG);
+
+	XFS_STATS_INC(xs_ig_attrchg);
+
+	if (mp->m_flags & XFS_MOUNT_WSYNC)
+		xfs_trans_set_sync(tp);
+	code = xfs_trans_commit(tp, 0);
+	xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	return code;
+
+error_out:
+	xfs_trans_cancel(tp, 0);
+	if (lock_flags)
+		xfs_iunlock(ip, XFS_ILOCK_EXCL);
+	return code;
+}
+
+
 int
 xfs_readlink(
 	xfs_inode_t     *ip,
