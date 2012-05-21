@@ -22,6 +22,7 @@
 #include <linux/syscalls.h>
 #include <linux/uaccess.h>
 #include <linux/regset.h>
+#include <linux/vs_context.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/cn_proc.h>
 
@@ -217,6 +218,11 @@ ok:
 		dumpable = get_dumpable(task->mm);
 	if (!dumpable  && !ptrace_has_cap(task_user_ns(task), mode))
 		return -EPERM;
+	if (!vx_check(task->xid, VS_ADMIN_P|VS_WATCH_P|VS_IDENT))
+		return -EPERM;
+	if (!vx_check(task->xid, VS_IDENT) &&
+		!task_vx_flags(task, VXF_STATE_ADMIN, 0))
+		return -EACCES;
 
 	return security_ptrace_access_check(task, mode);
 }

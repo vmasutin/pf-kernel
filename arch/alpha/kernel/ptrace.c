@@ -13,6 +13,7 @@
 #include <linux/user.h>
 #include <linux/security.h>
 #include <linux/signal.h>
+#include <linux/vs_base.h>
 
 #include <asm/uaccess.h>
 #include <asm/pgtable.h>

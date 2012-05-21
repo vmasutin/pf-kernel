@@ -39,6 +39,7 @@
 #include <linux/slab.h>
 #include <linux/ratelimit.h>
 #include <linux/mount.h>
+#include <linux/vs_tag.h>
 #include "compat.h"
 #include "ctree.h"
 #include "disk-io.h"
@@ -2465,6 +2466,8 @@ static void btrfs_read_locked_inode(struct inode *inode)
 	struct btrfs_key location;
 	int maybe_acls;
 	u32 rdev;
+	uid_t uid;
+	gid_t gid;
 	int ret;
 	bool filled = false;
 
@@ -2492,8 +2495,13 @@ static void btrfs_read_locked_inode(struct inode *inode)
 				    struct btrfs_inode_item);
 	inode->i_mode = btrfs_inode_mode(leaf, inode_item);
 	set_nlink(inode, btrfs_inode_nlink(leaf, inode_item));
-	inode->i_uid = btrfs_inode_uid(leaf, inode_item);
-	inode->i_gid = btrfs_inode_gid(leaf, inode_item);
+
+	uid = btrfs_inode_uid(leaf, inode_item);
+	gid = btrfs_inode_gid(leaf, inode_item);
+	inode->i_uid = INOTAG_UID(DX_TAG(inode), uid, gid);
+	inode->i_gid = INOTAG_GID(DX_TAG(inode), uid, gid);
+	inode->i_tag = INOTAG_TAG(DX_TAG(inode), uid, gid,
+		btrfs_inode_tag(leaf, inode_item));
 	btrfs_i_size_write(inode, btrfs_inode_size(leaf, inode_item));
 
 	tspec = btrfs_inode_atime(inode_item);
@@ -2571,8 +2579,14 @@ static void fill_inode_item(struct btrfs_trans_handle *trans,
 			    struct btrfs_inode_item *item,
 			    struct inode *inode)
 {
-	btrfs_set_inode_uid(leaf, item, inode->i_uid);
-	btrfs_set_inode_gid(leaf, item, inode->i_gid);
+	uid_t uid = TAGINO_UID(DX_TAG(inode), inode->i_uid, inode->i_tag);
+	gid_t gid = TAGINO_GID(DX_TAG(inode), inode->i_gid, inode->i_tag);
+
+	btrfs_set_inode_uid(leaf, item, uid);
+	btrfs_set_inode_gid(leaf, item, gid);
+#ifdef CONFIG_TAGGING_INTERN
+	btrfs_set_inode_tag(leaf, item, inode->i_tag);
+#endif
 	btrfs_set_inode_size(leaf, item, BTRFS_I(inode)->disk_i_size);
 	btrfs_set_inode_mode(leaf, item, inode->i_mode);
 	btrfs_set_inode_nlink(leaf, item, inode->i_nlink);
@@ -7573,11 +7587,13 @@ static const struct inode_operations btrfs_dir_inode_operations = {
 	.listxattr	= btrfs_listxattr,
 	.removexattr	= btrfs_removexattr,
 	.permission	= btrfs_permission,
+	.sync_flags	= btrfs_sync_flags,
 	.get_acl	= btrfs_get_acl,
 };
 static const struct inode_operations btrfs_dir_ro_inode_operations = {
 	.lookup		= btrfs_lookup,
 	.permission	= btrfs_permission,
+	.sync_flags	= btrfs_sync_flags,
 	.get_acl	= btrfs_get_acl,
 };
 

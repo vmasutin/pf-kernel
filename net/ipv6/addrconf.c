@@ -88,6 +88,8 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 #include <linux/export.h>
+#include <linux/vs_network.h>
+#include <linux/vs_inet6.h>
 
 /* Set to 3 to get tracing... */
 #define ACONF_DEBUG 2
@@ -1104,7 +1106,7 @@ out:
 
 int ipv6_dev_get_saddr(struct net *net, struct net_device *dst_dev,
 		       const struct in6_addr *daddr, unsigned int prefs,
-		       struct in6_addr *saddr)
+		       struct in6_addr *saddr, struct nx_info *nxi)
 {
 	struct ipv6_saddr_score scores[2],
 				*score = &scores[0], *hiscore = &scores[1];
@@ -1176,6 +1178,8 @@ int ipv6_dev_get_saddr(struct net *net, struct net_device *dst_dev,
 					       dev->name);
 				continue;
 			}
+			if (!v6_addr_in_nx_info(nxi, &score->ifa->addr, -1))
+				continue;
 
 			score->rule = -1;
 			bitmap_zero(score->scorebits, IPV6_SADDR_RULE_MAX);
@@ -3159,7 +3163,10 @@ static void if6_seq_stop(struct seq_file *seq, void *v)
 static int if6_seq_show(struct seq_file *seq, void *v)
 {
 	struct inet6_ifaddr *ifp = (struct inet6_ifaddr *)v;
-	seq_printf(seq, "%pi6 %02x %02x %02x %02x %8s\n",
+
+	if (nx_check(0, VS_ADMIN|VS_WATCH) ||
+	    v6_addr_in_nx_info(current_nx_info(), &ifp->addr, -1))
+		seq_printf(seq, "%pi6 %02x %02x %02x %02x %8s\n",
 		   &ifp->addr,
 		   ifp->idev->dev->ifindex,
 		   ifp->prefix_len,
@@ -3665,6 +3672,11 @@ static int in6_dump_addrs(struct inet6_dev *idev, struct sk_buff *skb,
 	struct ifacaddr6 *ifaca;
 	int err = 1;
 	int ip_idx = *p_ip_idx;
+	struct nx_info *nxi = skb->sk ? skb->sk->sk_nx_info : NULL;
+
+	/* disable ipv6 on non v6 guests */
+	if (nxi && !nx_info_has_v6(nxi))
+		return skb->len;
 
 	read_lock_bh(&idev->lock);
 	switch (type) {
@@ -3675,6 +3687,8 @@ static int in6_dump_addrs(struct inet6_dev *idev, struct sk_buff *skb,
 		list_for_each_entry(ifa, &idev->addr_list, if_list) {
 			if (++ip_idx < s_ip_idx)
 				continue;
+				if (!v6_addr_in_nx_info(nxi, &ifa->addr, -1))
+					continue;
 			err = inet6_fill_ifaddr(skb, ifa,
 						NETLINK_CB(cb->skb).pid,
 						cb->nlh->nlmsg_seq,
@@ -3691,6 +3705,8 @@ static int in6_dump_addrs(struct inet6_dev *idev, struct sk_buff *skb,
 		     ifmca = ifmca->next, ip_idx++) {
 			if (ip_idx < s_ip_idx)
 				continue;
+				if (!v6_addr_in_nx_info(nxi, &ifmca->mca_addr, -1))
+					continue;
 			err = inet6_fill_ifmcaddr(skb, ifmca,
 						  NETLINK_CB(cb->skb).pid,
 						  cb->nlh->nlmsg_seq,
@@ -3706,6 +3722,8 @@ static int in6_dump_addrs(struct inet6_dev *idev, struct sk_buff *skb,
 		     ifaca = ifaca->aca_next, ip_idx++) {
 			if (ip_idx < s_ip_idx)
 				continue;
+				if (!v6_addr_in_nx_info(nxi, &ifaca->aca_addr, -1))
+					continue;
 			err = inet6_fill_ifacaddr(skb, ifaca,
 						  NETLINK_CB(cb->skb).pid,
 						  cb->nlh->nlmsg_seq,
@@ -4091,6 +4109,11 @@ static int inet6_dump_ifinfo(struct sk_buff *skb, struct netlink_callback *cb)
 	struct inet6_dev *idev;
 	struct hlist_head *head;
 	struct hlist_node *node;
+	struct nx_info *nxi = skb->sk ? skb->sk->sk_nx_info : NULL;
+
+	/* FIXME: maybe disable ipv6 on non v6 guests?
+	if (skb->sk && skb->sk->sk_vx_info)
+		return skb->len; */
 
 	s_h = cb->args[0];
 	s_idx = cb->args[1];
@@ -4101,6 +4124,8 @@ static int inet6_dump_ifinfo(struct sk_buff *skb, struct netlink_callback *cb)
 		head = &net->dev_index_head[h];
 		hlist_for_each_entry_rcu(dev, node, head, index_hlist) {
 			if (idx < s_idx)
+				goto cont;
+			if (!v6_dev_in_nx_info(dev, nxi))
 				goto cont;
 			idev = __in6_dev_get(dev);
 			if (!idev)

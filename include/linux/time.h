@@ -256,6 +256,8 @@ static __always_inline void timespec_add_ns(struct timespec *a, u64 ns)
 	a->tv_nsec = ns;
 }
 
+#include <linux/vs_time.h>
+
 #endif /* __KERNEL__ */
 
 #define NFDBITS			__NFDBITS
