@@ -396,6 +396,48 @@ static inline void bfq_flush_idle_tree(struct bfq_service_tree *st)
 }
 
 /**
+ * bfq_reparent_leaf_entity - move leaf entity to the root_group.
+ * @bfqd: the device data structure with the root group.
+ * @entity: the entity to move.
+ */
+static inline void bfq_reparent_leaf_entity(struct bfq_data *bfqd,
+					    struct bfq_entity *entity)
+{
+	struct bfq_queue *bfqq = bfq_entity_to_bfqq(entity);
+
+	BUG_ON(bfqq == NULL);
+	bfq_bfqq_move(bfqd, bfqq, entity, bfqd->root_group);
+	return;
+}
+
+/**
+ * bfq_reparent_active_entities - move to the root group all active entities.
+ * @bfqd: the device data structure with the root group.
+ * @bfqg: the group to move from.
+ * @st: the service tree with the entities.
+ *
+ * Needs queue_lock to be taken and reference to be valid over the call.
+ */
+static inline void bfq_reparent_active_entities(struct bfq_data *bfqd,
+						struct bfq_group *bfqg,
+						struct bfq_service_tree *st)
+{
+	struct rb_root *active = &st->active;
+	struct bfq_entity *entity = NULL;
+
+	if (!RB_EMPTY_ROOT(&st->active))
+		entity = bfq_entity_of(rb_first(active));
+
+	for (; entity != NULL ; entity = bfq_entity_of(rb_first(active)))
+		bfq_reparent_leaf_entity(bfqd, entity);
+
+	if (bfqg->sched_data.active_entity != NULL)
+		bfq_reparent_leaf_entity(bfqd, bfqg->sched_data.active_entity);
+
+	return;
+}
+
+/**
  * bfq_destroy_group - destroy @bfqg.
  * @bgrp: the bfqio_cgroup containing @bfqg.
  * @bfqg: the group being destroyed.
@@ -413,17 +455,9 @@ static void bfq_destroy_group(struct bfqio_cgroup *bgrp, struct bfq_group *bfqg)
 	hlist_del(&bfqg->group_node);
 
 	/*
-	 * We may race with device destruction, take extra care when
-	 * dereferencing bfqg->bfqd.
+	 * Empty all service_trees belonging to this group before deactivating
+	 * the group itself.
 	 */
-	bfqd = bfq_get_bfqd_locked(&bfqg->bfqd, &flags);
-	if (bfqd != NULL) {
-		hlist_del(&bfqg->bfqd_node);
-		__bfq_deactivate_entity(entity, 0);
-		bfq_put_async_queues(bfqd, bfqg);
-		bfq_put_bfqd_unlock(bfqd, &flags);
-	}
-
 	for (i = 0; i < BFQ_IOPRIO_CLASSES; i++) {
 		st = bfqg->sched_data.service_tree + i;
 
@@ -435,11 +469,40 @@ static void bfq_destroy_group(struct bfqio_cgroup *bgrp, struct bfq_group *bfqg)
 		 */
 		bfq_flush_idle_tree(st);
 
+		/*
+		 * It may happen that some queues are still active
+		 * (busy) upon group destruction (if the corresponding
+		 * processes have been forced to terminate). We move
+		 * all the leaf entities corresponding to these queues
+		 * to the root_group.
+		 * Also, it may happen that the group has an entity
+		 * under service, which is disconnected from the active
+		 * tree: it must be moved, too.
+		 * There is no need to put the sync queues, as the
+		 * scheduler has taken no reference.
+		 */
+		bfqd = bfq_get_bfqd_locked(&bfqg->bfqd, &flags);
+		if (bfqd != NULL) {
+			bfq_reparent_active_entities(bfqd, bfqg, st);
+			bfq_put_bfqd_unlock(bfqd, &flags);
+		}
 		BUG_ON(!RB_EMPTY_ROOT(&st->active));
 		BUG_ON(!RB_EMPTY_ROOT(&st->idle));
 	}
 	BUG_ON(bfqg->sched_data.next_active != NULL);
 	BUG_ON(bfqg->sched_data.active_entity != NULL);
+
+	/*
+	 * We may race with device destruction, take extra care when
+	 * dereferencing bfqg->bfqd.
+	 */
+	bfqd = bfq_get_bfqd_locked(&bfqg->bfqd, &flags);
+	if (bfqd != NULL) {
+		hlist_del(&bfqg->bfqd_node);
+		__bfq_deactivate_entity(entity, 0);
+		bfq_put_async_queues(bfqd, bfqg);
+		bfq_put_bfqd_unlock(bfqd, &flags);
+	}
 	BUG_ON(entity->tree != NULL);
 
 	/*
@@ -683,7 +746,10 @@ static void bfqio_attach(struct cgroup *cgroup, struct cgroup_taskset *tset)
 			 */
 			rcu_read_lock();
 			hlist_for_each_entry_rcu(icq, n, &ioc->icq_list, ioc_node)
-				bfq_bic_change_cgroup(icq_to_bic(icq), cgroup);
+				if (!strncmp(icq->q->elevator->type->elevator_name,
+					     "bfq", ELV_NAME_MAX))
+					bfq_bic_change_cgroup(icq_to_bic(icq),
+							      cgroup);
 			rcu_read_unlock();
 			put_io_context(ioc);
 		}
