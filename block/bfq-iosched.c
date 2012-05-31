@@ -692,23 +692,12 @@ static inline sector_t bfq_dist_from_last(struct bfq_data *bfqd,
  * bfqd->last_position, or if rq is closer to bfqd->last_position than
  * bfqq->next_rq
  */
-static inline int bfq_rq_close(struct bfq_data *bfqd, struct bfq_queue *bfqq,
-			       struct request *rq)
+static inline int bfq_rq_close(struct bfq_data *bfqd, struct request *rq)
 {
-	sector_t sdist = bfqq->seek_mean;
-
-	if (!bfq_sample_valid(bfqq->seek_samples))
-		sdist = BFQQ_SEEK_THR;
-
-	/* If seek_mean is large, using it as close criteria is meaningless */
-	if (sdist > BFQQ_SEEK_THR)
-		sdist = BFQQ_SEEK_THR;
-
-	return bfq_dist_from_last(bfqd, rq) <= sdist;
+	return bfq_dist_from_last(bfqd, rq) <= BFQQ_SEEK_THR;
 }
 
-static struct bfq_queue *bfqq_close(struct bfq_data *bfqd,
-				    struct bfq_queue *cur_bfqq)
+static struct bfq_queue *bfqq_close(struct bfq_data *bfqd)
 {
 	struct rb_root *root = &bfqd->rq_pos_tree;
 	struct rb_node *parent, *node;
@@ -732,7 +721,7 @@ static struct bfq_queue *bfqq_close(struct bfq_data *bfqd,
 	 * position).
 	 */
 	__bfqq = rb_entry(parent, struct bfq_queue, pos_node);
-	if (bfq_rq_close(bfqd, cur_bfqq, __bfqq->next_rq))
+	if (bfq_rq_close(bfqd, __bfqq->next_rq))
 		return __bfqq;
 
 	if (blk_rq_pos(__bfqq->next_rq) < sector)
@@ -743,7 +732,7 @@ static struct bfq_queue *bfqq_close(struct bfq_data *bfqd,
 		return NULL;
 
 	__bfqq = rb_entry(node, struct bfq_queue, pos_node);
-	if (bfq_rq_close(bfqd, cur_bfqq, __bfqq->next_rq))
+	if (bfq_rq_close(bfqd, __bfqq->next_rq))
 		return __bfqq;
 
 	return NULL;
@@ -779,7 +768,7 @@ static struct bfq_queue *bfq_close_cooperator(struct bfq_data *bfqd,
 	 * working closely on the same area of the disk. In that case,
 	 * we can group them together and don't waste time idling.
 	 */
-	bfqq = bfqq_close(bfqd, cur_bfqq);
+	bfqq = bfqq_close(bfqd);
 	if (bfqq == NULL || bfqq == cur_bfqq)
 		return NULL;
 
@@ -939,7 +928,7 @@ static int bfqq_process_refs(struct bfq_queue *bfqq)
 	int process_refs, io_refs;
 
 	io_refs = bfqq->allocated[READ] + bfqq->allocated[WRITE];
-	process_refs = atomic_read(&bfqq->ref) - io_refs;
+	process_refs = atomic_read(&bfqq->ref) - io_refs - bfqq->entity.on_st;
 	BUG_ON(process_refs < 0);
 	return process_refs;
 }
@@ -2656,16 +2645,23 @@ static ssize_t bfq_weights_show(struct elevator_queue *e, char *page)
 	struct bfq_data *bfqd = e->elevator_data;
 	ssize_t num_char = 0;
 
+	num_char += sprintf(page + num_char, "Tot reqs queued %d\n\n",
+			    bfqd->queued);
+
 	num_char += sprintf(page + num_char, "Active:\n");
 	list_for_each_entry(bfqq, &bfqd->active_list, bfqq_list) {
-		num_char += sprintf(page + num_char,
-			"pid%d: weight %hu, dur %d/%u\n",
-			bfqq->pid,
-			bfqq->entity.weight,
+	  num_char += sprintf(page + num_char,
+			      "pid%d: weight %hu, nr_queued %d %d,"
+			      " dur %d/%u\n",
+			      bfqq->pid,
+			      bfqq->entity.weight,
+			      bfqq->queued[0],
+			      bfqq->queued[1],
 			jiffies_to_msecs(jiffies -
 				bfqq->last_rais_start_finish),
 			jiffies_to_msecs(bfqq->raising_cur_max_time));
 	}
+
 	num_char += sprintf(page + num_char, "Idle:\n");
 	list_for_each_entry(bfqq, &bfqd->idle_list, bfqq_list) {
 			num_char += sprintf(page + num_char,
