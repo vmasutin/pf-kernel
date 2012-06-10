@@ -14,7 +14,6 @@
 
 #include <linux/quotaops.h>
 #include <linux/random.h>
-#include <linux/vs_tag.h>
 
 #include "ext3.h"
 #include "xattr.h"
@@ -486,7 +485,6 @@ got:
 		inode->i_mode = mode;
 		inode->i_uid = current_fsuid();
 		inode->i_gid = dir->i_gid;
-		inode->i_tag = dx_current_fstag(sb);
 	} else
 		inode_init_owner(inode, dir, mode);
 

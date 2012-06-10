@@ -32,7 +32,6 @@
 
 #include <linux/pagemap.h>
 #include <linux/quotaops.h>
-#include <linux/vs_tag.h>
 #include "ext2.h"
 #include "xattr.h"
 #include "acl.h"
@@ -74,7 +73,6 @@ static struct dentry *ext2_lookup(struct inode * dir, struct dentry *dentry, str
 					(unsigned long) ino);
 			return ERR_PTR(-EIO);
 		}
-		dx_propagate_tag(nd, inode);
 	}
 	return d_splice_alias(inode, dentry);
 }
@@ -399,7 +397,6 @@ const struct inode_operations ext2_dir_inode_operations = {
 	.removexattr	= generic_removexattr,
 #endif
 	.setattr	= ext2_setattr,
-	.sync_flags	= ext2_sync_flags,
 	.get_acl	= ext2_get_acl,
 };
 

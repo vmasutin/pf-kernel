@@ -193,6 +193,7 @@ cat << EOF
 #define __IGNORE_afs_syscall
 #define __IGNORE_getpmsg
 #define __IGNORE_putpmsg
+#define __IGNORE_vserver
 EOF
 }
 

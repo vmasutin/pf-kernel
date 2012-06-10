@@ -20,7 +20,6 @@
 #include <linux/nfs3.h>
 #include <linux/nfs_fs.h>
 #include <linux/nfsacl.h>
-#include <linux/vs_tag.h>
 #include "internal.h"
 
 #define NFSDBG_FACILITY		NFSDBG_XDR
@@ -563,8 +562,7 @@ static __be32 *xdr_decode_nfstime3(__be32 *p, struct timespec *timep)
  *		set_mtime	mtime;
  *	};
  */
-static void encode_sattr3(struct xdr_stream *xdr,
-	const struct iattr *attr, int tag)
+static void encode_sattr3(struct xdr_stream *xdr, const struct iattr *attr)
 {
 	u32 nbytes;
 	__be32 *p;
@@ -596,19 +594,15 @@ static void encode_sattr3(struct xdr_stream *xdr,
 	} else
 		*p++ = xdr_zero;
 
-	if (attr->ia_valid & ATTR_UID ||
-		(tag && (attr->ia_valid & ATTR_TAG))) {
+	if (attr->ia_valid & ATTR_UID) {
 		*p++ = xdr_one;
-		*p++ = cpu_to_be32(TAGINO_UID(tag,
-			attr->ia_uid, attr->ia_tag));
+		*p++ = cpu_to_be32(attr->ia_uid);
 	} else
 		*p++ = xdr_zero;
 
-	if (attr->ia_valid & ATTR_GID ||
-		(tag && (attr->ia_valid & ATTR_TAG))) {
+	if (attr->ia_valid & ATTR_GID) {
 		*p++ = xdr_one;
-		*p++ = cpu_to_be32(TAGINO_GID(tag,
-			attr->ia_gid, attr->ia_tag));
+		*p++ = cpu_to_be32(attr->ia_gid);
 	} else
 		*p++ = xdr_zero;
 
@@ -884,7 +878,7 @@ static void nfs3_xdr_enc_setattr3args(struct rpc_rqst *req,
 				      const struct nfs3_sattrargs *args)
 {
 	encode_nfs_fh3(xdr, args->fh);
-	encode_sattr3(xdr, args->sattr, req->rq_task->tk_client->cl_tag);
+	encode_sattr3(xdr, args->sattr);
 	encode_sattrguard3(xdr, args);
 }
 
@@ -1034,13 +1028,13 @@ static void nfs3_xdr_enc_write3args(struct rpc_rqst *req,
  *	};
  */
 static void encode_createhow3(struct xdr_stream *xdr,
-	const struct nfs3_createargs *args, int tag)
+			      const struct nfs3_createargs *args)
 {
 	encode_uint32(xdr, args->createmode);
 	switch (args->createmode) {
 	case NFS3_CREATE_UNCHECKED:
 	case NFS3_CREATE_GUARDED:
-		encode_sattr3(xdr, args->sattr, tag);
+		encode_sattr3(xdr, args->sattr);
 		break;
 	case NFS3_CREATE_EXCLUSIVE:
 		encode_createverf3(xdr, args->verifier);
@@ -1055,7 +1049,7 @@ static void nfs3_xdr_enc_create3args(struct rpc_rqst *req,
 				     const struct nfs3_createargs *args)
 {
 	encode_diropargs3(xdr, args->fh, args->name, args->len);
-	encode_createhow3(xdr, args, req->rq_task->tk_client->cl_tag);
+	encode_createhow3(xdr, args);
 }
 
 /*
@@ -1071,7 +1065,7 @@ static void nfs3_xdr_enc_mkdir3args(struct rpc_rqst *req,
 				    const struct nfs3_mkdirargs *args)
 {
 	encode_diropargs3(xdr, args->fh, args->name, args->len);
-	encode_sattr3(xdr, args->sattr, req->rq_task->tk_client->cl_tag);
+	encode_sattr3(xdr, args->sattr);
 }
 
 /*
@@ -1088,9 +1082,9 @@ static void nfs3_xdr_enc_mkdir3args(struct rpc_rqst *req,
  *	};
  */
 static void encode_symlinkdata3(struct xdr_stream *xdr,
-	const struct nfs3_symlinkargs *args, int tag)
+				const struct nfs3_symlinkargs *args)
 {
-	encode_sattr3(xdr, args->sattr, tag);
+	encode_sattr3(xdr, args->sattr);
 	encode_nfspath3(xdr, args->pages, args->pathlen);
 }
 
@@ -1099,7 +1093,7 @@ static void nfs3_xdr_enc_symlink3args(struct rpc_rqst *req,
 				      const struct nfs3_symlinkargs *args)
 {
 	encode_diropargs3(xdr, args->fromfh, args->fromname, args->fromlen);
-	encode_symlinkdata3(xdr, args, req->rq_task->tk_client->cl_tag);
+	encode_symlinkdata3(xdr, args);
 }
 
 /*
@@ -1127,24 +1121,24 @@ static void nfs3_xdr_enc_symlink3args(struct rpc_rqst *req,
  *	};
  */
 static void encode_devicedata3(struct xdr_stream *xdr,
-	const struct nfs3_mknodargs *args, int tag)
+			       const struct nfs3_mknodargs *args)
 {
-	encode_sattr3(xdr, args->sattr, tag);
+	encode_sattr3(xdr, args->sattr);
 	encode_specdata3(xdr, args->rdev);
 }
 
 static void encode_mknoddata3(struct xdr_stream *xdr,
-	const struct nfs3_mknodargs *args, int tag)
+			      const struct nfs3_mknodargs *args)
 {
 	encode_ftype3(xdr, args->type);
 	switch (args->type) {
 	case NF3CHR:
 	case NF3BLK:
-		encode_devicedata3(xdr, args, tag);
+		encode_devicedata3(xdr, args);
 		break;
 	case NF3SOCK:
 	case NF3FIFO:
-		encode_sattr3(xdr, args->sattr, tag);
+		encode_sattr3(xdr, args->sattr);
 		break;
 	case NF3REG:
 	case NF3DIR:
@@ -1159,7 +1153,7 @@ static void nfs3_xdr_enc_mknod3args(struct rpc_rqst *req,
 				    const struct nfs3_mknodargs *args)
 {
 	encode_diropargs3(xdr, args->fh, args->name, args->len);
-	encode_mknoddata3(xdr, args, req->rq_task->tk_client->cl_tag);
+	encode_mknoddata3(xdr, args);
 }
 
 /*

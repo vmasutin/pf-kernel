@@ -280,7 +280,6 @@ struct cpu_vfs_cap_data {
    arbitrary SCSI commands */
 /* Allow setting encryption key on loopback filesystem */
 /* Allow setting zone reclaim policy */
-/* Allow the selection of a security context */
 
 #define CAP_SYS_ADMIN        21
 
@@ -364,12 +363,7 @@ struct cpu_vfs_cap_data {
 
 #define CAP_LAST_CAP         CAP_WAKE_ALARM
 
-/* Allow context manipulations */
-/* Allow changing context info on files */
-
-#define CAP_CONTEXT	     63
-
-#define cap_valid(x) ((x) >= 0 && ((x) <= CAP_LAST_CAP || (x) == CAP_CONTEXT))
+#define cap_valid(x) ((x) >= 0 && (x) <= CAP_LAST_CAP)
 
 /*
  * Bit location of each capability (used by user-space library and kernel)

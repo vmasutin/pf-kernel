@@ -81,7 +81,6 @@
 #if defined(CONFIG_PROVE_LOCKING) || defined(CONFIG_LOCK_STAT)
 #include <linux/lockdep.h>
 #endif
-extern char vshelper_path[];
 #ifdef CONFIG_CHR_DEV_SG
 #include <scsi/sg.h>
 #endif
@@ -570,13 +569,6 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= proc_dostring,
 	},
 #endif
-	{
-		.procname	= "vshelper",
-		.data		= &vshelper_path,
-		.maxlen		= 256,
-		.mode		= 0644,
-		.proc_handler	= &proc_dostring,
-	},
 #ifdef CONFIG_CHR_DEV_SG
 	{
 		.procname	= "sg-big-buff",

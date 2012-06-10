@@ -239,7 +239,6 @@ void getnstimeofday(struct timespec *ts)
 	} while (read_seqretry(&timekeeper.lock, seq));
 
 	timespec_add_ns(ts, nsecs);
-	vx_adjust_timespec(ts);
 }
 
 EXPORT_SYMBOL(getnstimeofday);

@@ -3,7 +3,6 @@
 
 #include <linux/spinlock.h>
 #include <linux/sched.h>
-#include <linux/vserver/debug.h>
 
 struct mnt_namespace;
 struct uts_namespace;
@@ -64,7 +63,6 @@ static inline struct nsproxy *task_nsproxy(struct task_struct *tsk)
 }
 
 int copy_namespaces(unsigned long flags, struct task_struct *tsk);
-struct nsproxy *copy_nsproxy(struct nsproxy *orig);
 void exit_task_namespaces(struct task_struct *tsk);
 void switch_task_namespaces(struct task_struct *tsk, struct nsproxy *new);
 void free_nsproxy(struct nsproxy *ns);
@@ -72,26 +70,16 @@ int unshare_nsproxy_namespaces(unsigned long, struct nsproxy **,
 	struct fs_struct *);
 int __init nsproxy_cache_init(void);
 
-#define	get_nsproxy(n)	__get_nsproxy(n, __FILE__, __LINE__)
-
-static inline void __get_nsproxy(struct nsproxy *ns,
-	const char *_file, int _line)
+static inline void put_nsproxy(struct nsproxy *ns)
 {
-	vxlprintk(VXD_CBIT(space, 0), "get_nsproxy(%p[%u])",
-		ns, atomic_read(&ns->count), _file, _line);
-	atomic_inc(&ns->count);
-}
-
-#define	put_nsproxy(n)	__put_nsproxy(n, __FILE__, __LINE__)
-
-static inline void __put_nsproxy(struct nsproxy *ns,
-	const char *_file, int _line)
-{
-	vxlprintk(VXD_CBIT(space, 0), "put_nsproxy(%p[%u])",
-		ns, atomic_read(&ns->count), _file, _line);
 	if (atomic_dec_and_test(&ns->count)) {
 		free_nsproxy(ns);
 	}
+}
+
+static inline void get_nsproxy(struct nsproxy *ns)
+{
+	atomic_inc(&ns->count);
 }
 
 #endif

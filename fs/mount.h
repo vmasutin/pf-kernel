@@ -47,7 +47,6 @@ struct mount {
 	int mnt_expiry_mark;		/* true if marked for expiry */
 	int mnt_pinned;
 	int mnt_ghosts;
-	tag_t mnt_tag;			/* tagging used for vfsmount */
 };
 
 static inline struct mount *real_mount(struct vfsmount *mnt)

@@ -40,10 +40,6 @@
 #include <linux/irq_work.h>
 #include <linux/sched.h>
 #include <linux/slab.h>
-#include <linux/vs_base.h>
-#include <linux/vs_cvirt.h>
-#include <linux/vs_pid.h>
-#include <linux/vserver/sched.h>
 
 #include <asm/uaccess.h>
 #include <asm/unistd.h>
@@ -1390,6 +1386,12 @@ SYSCALL_DEFINE1(alarm, unsigned int, seconds)
 
 #endif
 
+#ifndef __alpha__
+
+/*
+ * The Alpha uses getxpid, getxuid, and getxgid instead.  Maybe this
+ * should be moved into arch/i386 instead?
+ */
 
 /**
  * sys_getpid - return the thread group id of the current process
@@ -1418,22 +1420,9 @@ SYSCALL_DEFINE0(getppid)
 	rcu_read_lock();
 	pid = task_tgid_vnr(rcu_dereference(current->real_parent));
 	rcu_read_unlock();
-	return vx_map_pid(pid);
+
+	return pid;
 }
-
-#ifdef __alpha__
-
-/*
- * The Alpha uses getxpid, getxuid, and getxgid instead.
- */
-
-asmlinkage long do_getxpid(long *ppid)
-{
-	*ppid = sys_getppid();
-	return sys_getpid();
-}
-
-#else /* _alpha_ */
 
 SYSCALL_DEFINE0(getuid)
 {

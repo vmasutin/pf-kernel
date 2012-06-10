@@ -19,13 +19,8 @@
 #include <linux/mount.h>
 #include <linux/pid_namespace.h>
 #include <linux/parser.h>
-#include <linux/vserver/inode.h>
 
 #include "internal.h"
-
-struct proc_dir_entry *proc_virtual;
-
-extern void proc_vx_init(void);
 
 static int proc_test_super(struct super_block *sb, void *data)
 {
@@ -195,7 +190,6 @@ void __init proc_root_init(void)
 #endif
 	proc_mkdir("bus", NULL);
 	proc_sys_init();
-	proc_vx_init();
 }
 
 static int proc_root_getattr(struct vfsmount *mnt, struct dentry *dentry, struct kstat *stat
@@ -263,7 +257,6 @@ struct proc_dir_entry proc_root = {
 	.proc_iops	= &proc_root_inode_operations, 
 	.proc_fops	= &proc_root_operations,
 	.parent		= &proc_root,
-	.vx_flags	= IATTR_ADMIN | IATTR_WATCH,
 	.name		= "/proc",
 };
 

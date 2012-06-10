@@ -48,10 +48,6 @@
 #include <linux/fs_struct.h>
 #include <linux/init_task.h>
 #include <linux/perf_event.h>
-#include <linux/vs_limit.h>
-#include <linux/vs_context.h>
-#include <linux/vs_network.h>
-#include <linux/vs_pid.h>
 #include <trace/events/sched.h>
 #include <linux/hw_breakpoint.h>
 #include <linux/oom.h>
@@ -486,11 +482,9 @@ static void close_files(struct files_struct * files)
 					filp_close(file, files);
 					cond_resched();
 				}
-				vx_openfd_dec(i);
 			}
 			i++;
 			set >>= 1;
-			cond_resched();
 		}
 	}
 }
@@ -1068,15 +1062,10 @@ void do_exit(long code)
 	smp_mb();
 	raw_spin_unlock_wait(&tsk->pi_lock);
 
-	/* needs to stay after exit_notify() */
-	exit_vx_info(tsk, code);
-	exit_nx_info(tsk);
-
 	/* causes final put_task_struct in finish_task_switch(). */
 	tsk->state = TASK_DEAD;
 	tsk->flags |= PF_NOFREEZE;	/* tell freezer to ignore us */
 	schedule();
-	printk("bad task: %p [%lx]\n", current, current->state);
 	BUG();
 	/* Avoid "noreturn function does return".  */
 	for (;;)

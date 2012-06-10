@@ -24,8 +24,6 @@
 #include <linux/percpu_counter.h>
 #include <linux/percpu.h>
 #include <linux/ima.h>
-#include <linux/vs_limit.h>
-#include <linux/vs_context.h>
 
 #include <linux/atomic.h>
 
@@ -137,8 +135,6 @@ struct file *get_empty_filp(void)
 	spin_lock_init(&f->f_lock);
 	eventpoll_init_file(f);
 	/* f->f_version: 0 */
-	f->f_xid = vx_current_xid();
-	vx_files_inc(f);
 	return f;
 
 over:
@@ -256,8 +252,6 @@ static void __fput(struct file *file)
 	}
 	fops_put(file->f_op);
 	put_pid(file->f_owner.pid);
-	vx_files_dec(file);
-	file->f_xid = 0;
 	file_sb_list_del(file);
 	if ((file->f_mode & (FMODE_READ | FMODE_WRITE)) == FMODE_READ)
 		i_readcount_dec(inode);
@@ -388,8 +382,6 @@ void put_filp(struct file *file)
 {
 	if (atomic_long_dec_and_test(&file->f_count)) {
 		security_file_free(file);
-		vx_files_dec(file);
-		file->f_xid = 0;
 		file_sb_list_del(file);
 		file_free(file);
 	}

@@ -34,8 +34,6 @@
 #include <linux/ipc_namespace.h>
 #include <linux/user_namespace.h>
 #include <linux/slab.h>
-#include <linux/vs_context.h>
-#include <linux/vs_limit.h>
 
 #include <net/sock.h>
 #include "util.h"
@@ -69,7 +67,6 @@ struct mqueue_inode_info {
 	struct sigevent notify;
 	struct pid* notify_owner;
 	struct user_struct *user;	/* user who created, for accounting */
-	struct vx_info *vxi;
 	struct sock *notify_sock;
 	struct sk_buff *notify_cookie;
 
@@ -132,7 +129,6 @@ static struct inode *mqueue_get_inode(struct super_block *sb,
 	if (S_ISREG(mode)) {
 		struct mqueue_inode_info *info;
 		unsigned long mq_bytes, mq_msg_tblsz;
-		struct vx_info *vxi = current_vx_info();
 
 		inode->i_fop = &mqueue_file_operations;
 		inode->i_size = FILENT_SIZE;
@@ -145,7 +141,6 @@ static struct inode *mqueue_get_inode(struct super_block *sb,
 		info->notify_owner = NULL;
 		info->qsize = 0;
 		info->user = NULL;	/* set when all is ok */
-		info->vxi = NULL;
 		memset(&info->attr, 0, sizeof(info->attr));
 		info->attr.mq_maxmsg = ipc_ns->mq_msg_max;
 		info->attr.mq_msgsize = ipc_ns->mq_msgsize_max;
@@ -163,20 +158,17 @@ static struct inode *mqueue_get_inode(struct super_block *sb,
 
 		spin_lock(&mq_lock);
 		if (u->mq_bytes + mq_bytes < u->mq_bytes ||
-		    u->mq_bytes + mq_bytes > rlimit(RLIMIT_MSGQUEUE) ||
-		    !vx_ipcmsg_avail(vxi, mq_bytes)) {
+		    u->mq_bytes + mq_bytes > rlimit(RLIMIT_MSGQUEUE)) {
 			spin_unlock(&mq_lock);
 			/* mqueue_evict_inode() releases info->messages */
 			ret = -EMFILE;
 			goto out_inode;
 		}
 		u->mq_bytes += mq_bytes;
-		vx_ipcmsg_add(vxi, u, mq_bytes);
 		spin_unlock(&mq_lock);
 
 		/* all is ok */
 		info->user = get_uid(u);
-		info->vxi = get_vx_info(vxi);
 	} else if (S_ISDIR(mode)) {
 		inc_nlink(inode);
 		/* Some things misbehave if size == 0 on a directory */
@@ -275,11 +267,8 @@ static void mqueue_evict_inode(struct inode *inode)
 	    + info->attr.mq_msgsize);
 	user = info->user;
 	if (user) {
-		struct vx_info *vxi = info->vxi;
-
 		spin_lock(&mq_lock);
 		user->mq_bytes -= mq_bytes;
-		vx_ipcmsg_sub(vxi, user, mq_bytes);
 		/*
 		 * get_ns_from_inode() ensures that the
 		 * (ipc_ns = sb->s_fs_info) is either a valid ipc_ns
@@ -289,7 +278,6 @@ static void mqueue_evict_inode(struct inode *inode)
 		if (ipc_ns)
 			ipc_ns->mq_queues_count--;
 		spin_unlock(&mq_lock);
-		put_vx_info(vxi);
 		free_uid(user);
 	}
 	if (ipc_ns)

@@ -236,7 +236,6 @@ xfs_inotobp(
 	return 0;
 }
 
-#include <linux/vs_tag.h>
 
 /*
  * This routine is called to map an inode to the buffer containing
@@ -632,25 +631,15 @@ xfs_iformat_btree(
 STATIC void
 xfs_dinode_from_disk(
 	xfs_icdinode_t		*to,
-	xfs_dinode_t		*from,
-	int tagged)
+	xfs_dinode_t		*from)
 {
-	uint32_t uid, gid, tag;
-
 	to->di_magic = be16_to_cpu(from->di_magic);
 	to->di_mode = be16_to_cpu(from->di_mode);
 	to->di_version = from ->di_version;
 	to->di_format = from->di_format;
 	to->di_onlink = be16_to_cpu(from->di_onlink);
-
-	uid = be32_to_cpu(from->di_uid);
-	gid = be32_to_cpu(from->di_gid);
-	tag = be16_to_cpu(from->di_tag);
-
-	to->di_uid = INOTAG_UID(tagged, uid, gid);
-	to->di_gid = INOTAG_GID(tagged, uid, gid);
-	to->di_tag = INOTAG_TAG(tagged, uid, gid, tag);
-
+	to->di_uid = be32_to_cpu(from->di_uid);
+	to->di_gid = be32_to_cpu(from->di_gid);
 	to->di_nlink = be32_to_cpu(from->di_nlink);
 	to->di_projid_lo = be16_to_cpu(from->di_projid_lo);
 	to->di_projid_hi = be16_to_cpu(from->di_projid_hi);
@@ -672,26 +661,21 @@ xfs_dinode_from_disk(
 	to->di_dmevmask	= be32_to_cpu(from->di_dmevmask);
 	to->di_dmstate	= be16_to_cpu(from->di_dmstate);
 	to->di_flags	= be16_to_cpu(from->di_flags);
-	to->di_vflags	= be16_to_cpu(from->di_vflags);
 	to->di_gen	= be32_to_cpu(from->di_gen);
 }
 
 void
 xfs_dinode_to_disk(
 	xfs_dinode_t		*to,
-	xfs_icdinode_t		*from,
-	int tagged)
+	xfs_icdinode_t		*from)
 {
 	to->di_magic = cpu_to_be16(from->di_magic);
 	to->di_mode = cpu_to_be16(from->di_mode);
 	to->di_version = from ->di_version;
 	to->di_format = from->di_format;
 	to->di_onlink = cpu_to_be16(from->di_onlink);
-
-	to->di_uid = cpu_to_be32(TAGINO_UID(tagged, from->di_uid, from->di_tag));
-	to->di_gid = cpu_to_be32(TAGINO_GID(tagged, from->di_gid, from->di_tag));
-	to->di_tag = cpu_to_be16(TAGINO_TAG(tagged, from->di_tag));
-
+	to->di_uid = cpu_to_be32(from->di_uid);
+	to->di_gid = cpu_to_be32(from->di_gid);
 	to->di_nlink = cpu_to_be32(from->di_nlink);
 	to->di_projid_lo = cpu_to_be16(from->di_projid_lo);
 	to->di_projid_hi = cpu_to_be16(from->di_projid_hi);
@@ -713,14 +697,12 @@ xfs_dinode_to_disk(
 	to->di_dmevmask = cpu_to_be32(from->di_dmevmask);
 	to->di_dmstate = cpu_to_be16(from->di_dmstate);
 	to->di_flags = cpu_to_be16(from->di_flags);
-	to->di_vflags = cpu_to_be16(from->di_vflags);
 	to->di_gen = cpu_to_be32(from->di_gen);
 }
 
 STATIC uint
 _xfs_dic2xflags(
-	__uint16_t		di_flags,
-	__uint16_t		di_vflags)
+	__uint16_t		di_flags)
 {
 	uint			flags = 0;
 
@@ -731,8 +713,6 @@ _xfs_dic2xflags(
 			flags |= XFS_XFLAG_PREALLOC;
 		if (di_flags & XFS_DIFLAG_IMMUTABLE)
 			flags |= XFS_XFLAG_IMMUTABLE;
-		if (di_flags & XFS_DIFLAG_IXUNLINK)
-			flags |= XFS_XFLAG_IXUNLINK;
 		if (di_flags & XFS_DIFLAG_APPEND)
 			flags |= XFS_XFLAG_APPEND;
 		if (di_flags & XFS_DIFLAG_SYNC)
@@ -757,10 +737,6 @@ _xfs_dic2xflags(
 			flags |= XFS_XFLAG_FILESTREAM;
 	}
 
-	if (di_vflags & XFS_DIVFLAG_BARRIER)
-		flags |= FS_BARRIER_FL;
-	if (di_vflags & XFS_DIVFLAG_COW)
-		flags |= FS_COW_FL;
 	return flags;
 }
 
@@ -770,7 +746,7 @@ xfs_ip2xflags(
 {
 	xfs_icdinode_t		*dic = &ip->i_d;
 
-	return _xfs_dic2xflags(dic->di_flags, dic->di_vflags) |
+	return _xfs_dic2xflags(dic->di_flags) |
 				(XFS_IFORK_Q(ip) ? XFS_XFLAG_HASATTR : 0);
 }
 
@@ -778,8 +754,7 @@ uint
 xfs_dic2xflags(
 	xfs_dinode_t		*dip)
 {
-	return _xfs_dic2xflags(be16_to_cpu(dip->di_flags),
-				be16_to_cpu(dip->di_vflags)) |
+	return _xfs_dic2xflags(be16_to_cpu(dip->di_flags)) |
 				(XFS_DFORK_Q(dip) ? XFS_XFLAG_HASATTR : 0);
 }
 
@@ -812,6 +787,7 @@ xfs_iread(
 	if (error)
 		return error;
 	dip = (xfs_dinode_t *)xfs_buf_offset(bp, ip->i_imap.im_boffset);
+
 	/*
 	 * If we got something that isn't an inode it means someone
 	 * (nfs or dmi) has a stale handle.
@@ -834,8 +810,7 @@ xfs_iread(
 	 * Otherwise, just get the truly permanent information.
 	 */
 	if (dip->di_mode) {
-		xfs_dinode_from_disk(&ip->i_d, dip,
-			mp->m_flags & XFS_MOUNT_TAGGED);
+		xfs_dinode_from_disk(&ip->i_d, dip);
 		error = xfs_iformat(ip, dip);
 		if (error)  {
 #ifdef DEBUG
@@ -1023,7 +998,6 @@ xfs_ialloc(
 	ASSERT(ip->i_d.di_nlink == nlink);
 	ip->i_d.di_uid = current_fsuid();
 	ip->i_d.di_gid = current_fsgid();
-	ip->i_d.di_tag = current_fstag(&ip->i_vnode);
 	xfs_set_projid(ip, prid);
 	memset(&(ip->i_d.di_pad[0]), 0, sizeof(ip->i_d.di_pad));
 
@@ -1083,7 +1057,6 @@ xfs_ialloc(
 	ip->i_d.di_dmevmask = 0;
 	ip->i_d.di_dmstate = 0;
 	ip->i_d.di_flags = 0;
-	ip->i_d.di_vflags = 0;
 	flags = XFS_ILOG_CORE;
 	switch (mode & S_IFMT) {
 	case S_IFIFO:
@@ -1752,7 +1725,6 @@ xfs_ifree(
 	}
 	ip->i_d.di_mode = 0;		/* mark incore inode as free */
 	ip->i_d.di_flags = 0;
-	ip->i_d.di_vflags = 0;
 	ip->i_d.di_dmevmask = 0;
 	ip->i_d.di_forkoff = 0;		/* mark the attr fork not in use */
 	ip->i_d.di_format = XFS_DINODE_FMT_EXTENTS;
@@ -2626,8 +2598,7 @@ xfs_iflush_int(
 	 * because if the inode is dirty at all the core must
 	 * be.
 	 */
-	xfs_dinode_to_disk(dip, &ip->i_d,
-		mp->m_flags & XFS_MOUNT_TAGGED);
+	xfs_dinode_to_disk(dip, &ip->i_d);
 
 	/* Wrap, we never let the log put out DI_MAX_FLUSH */
 	if (ip->i_d.di_flushiter == DI_MAX_FLUSH)

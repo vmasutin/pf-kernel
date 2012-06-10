@@ -4,7 +4,6 @@
 #include <linux/path.h>
 #include <linux/slab.h>
 #include <linux/fs_struct.h>
-#include <linux/vserver/global.h>
 #include "internal.h"
 
 static inline void path_get_longterm(struct path *path)
@@ -100,7 +99,6 @@ void free_fs_struct(struct fs_struct *fs)
 {
 	path_put_longterm(&fs->root);
 	path_put_longterm(&fs->pwd);
-	atomic_dec(&vs_global_fs);
 	kmem_cache_free(fs_cachep, fs);
 }
 
@@ -138,7 +136,6 @@ struct fs_struct *copy_fs_struct(struct fs_struct *old)
 		fs->pwd = old->pwd;
 		path_get_longterm(&fs->pwd);
 		spin_unlock(&old->lock);
-		atomic_inc(&vs_global_fs);
 	}
 	return fs;
 }

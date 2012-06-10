@@ -16,7 +16,6 @@
 #include <linux/dm-ioctl.h>
 #include <linux/hdreg.h>
 #include <linux/compat.h>
-#include <linux/vs_context.h>
 
 #include <asm/uaccess.h>
 
@@ -107,8 +106,7 @@ static struct hash_cell *__get_name_cell(const char *str)
 	unsigned int h = hash_str(str);
 
 	list_for_each_entry (hc, _name_buckets + h, name_list)
-		if (vx_check(dm_get_xid(hc->md), VS_WATCH_P | VS_IDENT) &&
-			!strcmp(hc->name, str)) {
+		if (!strcmp(hc->name, str)) {
 			dm_get(hc->md);
 			return hc;
 		}
@@ -122,8 +120,7 @@ static struct hash_cell *__get_uuid_cell(const char *str)
 	unsigned int h = hash_str(str);
 
 	list_for_each_entry (hc, _uuid_buckets + h, uuid_list)
-		if (vx_check(dm_get_xid(hc->md), VS_WATCH_P | VS_IDENT) &&
-			!strcmp(hc->uuid, str)) {
+		if (!strcmp(hc->uuid, str)) {
 			dm_get(hc->md);
 			return hc;
 		}
@@ -134,15 +131,13 @@ static struct hash_cell *__get_uuid_cell(const char *str)
 static struct hash_cell *__get_dev_cell(uint64_t dev)
 {
 	struct mapped_device *md;
-	struct hash_cell *hc = NULL;
+	struct hash_cell *hc;
 
 	md = dm_get_md(huge_decode_dev(dev));
 	if (!md)
 		return NULL;
 
-	if (vx_check(dm_get_xid(md), VS_WATCH_P | VS_IDENT))
-		hc = dm_get_mdptr(md);
-
+	hc = dm_get_mdptr(md);
 	if (!hc) {
 		dm_put(md);
 		return NULL;
@@ -450,9 +445,6 @@ typedef int (*ioctl_fn)(struct dm_ioctl *param, size_t param_size);
 
 static int remove_all(struct dm_ioctl *param, size_t param_size)
 {
-	if (!vx_check(0, VS_ADMIN))
-		return -EPERM;
-
 	dm_hash_remove_all(1);
 	param->data_size = 0;
 	return 0;
@@ -500,8 +492,6 @@ static int list_devices(struct dm_ioctl *param, size_t param_size)
 	 */
 	for (i = 0; i < NUM_BUCKETS; i++) {
 		list_for_each_entry (hc, _name_buckets + i, name_list) {
-			if (!vx_check(dm_get_xid(hc->md), VS_WATCH_P | VS_IDENT))
-				continue;
 			needed += sizeof(struct dm_name_list);
 			needed += strlen(hc->name) + 1;
 			needed += ALIGN_MASK;
@@ -525,8 +515,6 @@ static int list_devices(struct dm_ioctl *param, size_t param_size)
 	 */
 	for (i = 0; i < NUM_BUCKETS; i++) {
 		list_for_each_entry (hc, _name_buckets + i, name_list) {
-			if (!vx_check(dm_get_xid(hc->md), VS_WATCH_P | VS_IDENT))
-				continue;
 			if (old_nl)
 				old_nl->next = (uint32_t) ((void *) nl -
 							   (void *) old_nl);
@@ -1628,8 +1616,8 @@ static int ctl_ioctl(uint command, struct dm_ioctl __user *user)
 	ioctl_fn fn = NULL;
 	size_t input_param_size;
 
-	/* only root and certain contexts can play with this */
-	if (!vx_capable(CAP_SYS_ADMIN, VXC_ADMIN_MAPPER))
+	/* only root can play with this */
+	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
 	if (_IOC_TYPE(command) != DM_IOCTL)

@@ -35,7 +35,6 @@
 #include <linux/sched.h>
 #include <linux/kmemleak.h>
 #include <linux/xattr.h>
-#include <linux/vs_tag.h>
 
 #include "delegation.h"
 #include "iostat.h"
@@ -1312,7 +1311,6 @@ static struct dentry *nfs_lookup(struct inode *dir, struct dentry * dentry, stru
 	if (IS_ERR(res))
 		goto out_unblock_sillyrename;
 
-	dx_propagate_tag(nd, inode);
 no_entry:
 	res = d_materialise_unique(dentry, inode);
 	if (res != NULL) {

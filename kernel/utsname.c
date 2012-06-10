@@ -16,17 +16,14 @@
 #include <linux/slab.h>
 #include <linux/user_namespace.h>
 #include <linux/proc_fs.h>
-#include <linux/vserver/global.h>
 
 static struct uts_namespace *create_uts_ns(void)
 {
 	struct uts_namespace *uts_ns;
 
 	uts_ns = kmalloc(sizeof(struct uts_namespace), GFP_KERNEL);
-	if (uts_ns) {
+	if (uts_ns)
 		kref_init(&uts_ns->kref);
-		atomic_inc(&vs_global_uts_ns);
-	}
 	return uts_ns;
 }
 
@@ -35,8 +32,8 @@ static struct uts_namespace *create_uts_ns(void)
  * @old_ns: namespace to clone
  * Return NULL on error (failure to kmalloc), new ns otherwise
  */
-static struct uts_namespace *clone_uts_ns(struct uts_namespace *old_ns,
-					  struct user_namespace *old_user)
+static struct uts_namespace *clone_uts_ns(struct task_struct *tsk,
+					  struct uts_namespace *old_ns)
 {
 	struct uts_namespace *ns;
 
@@ -46,7 +43,7 @@ static struct uts_namespace *clone_uts_ns(struct uts_namespace *old_ns,
 
 	down_read(&uts_sem);
 	memcpy(&ns->name, &old_ns->name, sizeof(ns->name));
-	ns->user_ns = get_user_ns(old_user);
+	ns->user_ns = get_user_ns(task_cred_xxx(tsk, user)->user_ns);
 	up_read(&uts_sem);
 	return ns;
 }
@@ -58,9 +55,9 @@ static struct uts_namespace *clone_uts_ns(struct uts_namespace *old_ns,
  * versa.
  */
 struct uts_namespace *copy_utsname(unsigned long flags,
-				   struct uts_namespace *old_ns,
-				   struct user_namespace *user_ns)
+				   struct task_struct *tsk)
 {
+	struct uts_namespace *old_ns = tsk->nsproxy->uts_ns;
 	struct uts_namespace *new_ns;
 
 	BUG_ON(!old_ns);
@@ -69,7 +66,7 @@ struct uts_namespace *copy_utsname(unsigned long flags,
 	if (!(flags & CLONE_NEWUTS))
 		return old_ns;
 
-	new_ns = clone_uts_ns(old_ns, user_ns);
+	new_ns = clone_uts_ns(tsk, old_ns);
 
 	put_uts_ns(old_ns);
 	return new_ns;
@@ -81,7 +78,6 @@ void free_uts_ns(struct kref *kref)
 
 	ns = container_of(kref, struct uts_namespace, kref);
 	put_user_ns(ns->user_ns);
-	atomic_dec(&vs_global_uts_ns);
 	kfree(ns);
 }
 

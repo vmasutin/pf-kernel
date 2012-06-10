@@ -68,9 +68,6 @@
 #include <linux/oom.h>
 #include <linux/khugepaged.h>
 #include <linux/signalfd.h>
-#include <linux/vs_context.h>
-#include <linux/vs_network.h>
-#include <linux/vs_limit.h>
 
 #include <asm/pgtable.h>
 #include <asm/pgalloc.h>
@@ -173,8 +170,6 @@ void free_task(struct task_struct *tsk)
 	account_kernel_stack(tsk->stack, -1);
 	free_thread_info(tsk->stack);
 	rt_mutex_debug_task_free(tsk);
-	clr_vx_info(&tsk->vx_info);
-	clr_nx_info(&tsk->nx_info);
 	ftrace_graph_exit_task(tsk);
 	free_task_struct(tsk);
 }
@@ -512,7 +507,6 @@ static struct mm_struct *mm_init(struct mm_struct *mm, struct task_struct *p)
 	if (likely(!mm_alloc_pgd(mm))) {
 		mm->def_flags = 0;
 		mmu_notifier_mm_init(mm);
-		set_vx_info(&mm->mm_vx_info, p->vx_info);
 		return mm;
 	}
 
@@ -565,7 +559,6 @@ void __mmdrop(struct mm_struct *mm)
 	destroy_context(mm);
 	mmu_notifier_mm_destroy(mm);
 	check_mm(mm);
-	clr_vx_info(&mm->mm_vx_info);
 	free_mm(mm);
 }
 EXPORT_SYMBOL_GPL(__mmdrop);
@@ -801,7 +794,6 @@ struct mm_struct *dup_mm(struct task_struct *tsk)
 		goto fail_nomem;
 
 	memcpy(mm, oldmm, sizeof(*mm));
-	mm->mm_vx_info = NULL;
 	mm_init_cpumask(mm);
 
 	/* Initializing for Swap token stuff */
@@ -845,7 +837,6 @@ fail_nocontext:
 	 * If init_new_context() failed, we cannot use mmput() to free the mm
 	 * because it calls destroy_context()
 	 */
-	clr_vx_info(&mm->mm_vx_info);
 	mm_free_pgd(mm);
 	free_mm(mm);
 	return NULL;
@@ -1134,8 +1125,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	int retval;
 	struct task_struct *p;
 	int cgroup_callbacks_done = 0;
-	struct vx_info *vxi;
-	struct nx_info *nxi;
 
 	if ((clone_flags & (CLONE_NEWNS|CLONE_FS)) == (CLONE_NEWNS|CLONE_FS))
 		return ERR_PTR(-EINVAL);
@@ -1182,12 +1171,7 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 	DEBUG_LOCKS_WARN_ON(!p->hardirqs_enabled);
 	DEBUG_LOCKS_WARN_ON(!p->softirqs_enabled);
 #endif
-	init_vx_info(&p->vx_info, current_vx_info());
-	init_nx_info(&p->nx_info, current_nx_info());
-
 	retval = -EAGAIN;
-	if (!vx_nproc_avail(1))
-		goto bad_fork_free;
 	if (atomic_read(&p->real_cred->user->processes) >=
 			task_rlimit(p, RLIMIT_NPROC)) {
 		if (!capable(CAP_SYS_ADMIN) && !capable(CAP_SYS_RESOURCE) &&
@@ -1464,18 +1448,6 @@ static struct task_struct *copy_process(unsigned long clone_flags,
 
 	total_forks++;
 	spin_unlock(&current->sighand->siglock);
-
-	/* p is copy of current */
-	vxi = p->vx_info;
-	if (vxi) {
-		claim_vx_info(vxi, p);
-		atomic_inc(&vxi->cvirt.nr_threads);
-		atomic_inc(&vxi->cvirt.total_forks);
-		vx_nproc_inc(p);
-	}
-	nxi = p->nx_info;
-	if (nxi)
-		claim_nx_info(nxi, p);
 	write_unlock_irq(&tasklist_lock);
 	proc_fork_connector(p);
 	cgroup_post_fork(p);

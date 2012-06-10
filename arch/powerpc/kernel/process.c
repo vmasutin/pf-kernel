@@ -661,9 +661,8 @@ void show_regs(struct pt_regs * regs)
 #else
 		printk("DAR: "REG", DSISR: %08lx\n", regs->dar, regs->dsisr);
 #endif
-	printk("TASK = %p[%d,#%u] '%s' THREAD: %p",
-	       current, task_pid_nr(current), current->xid,
-	       current->comm, task_thread_info(current));
+	printk("TASK = %p[%d] '%s' THREAD: %p",
+	       current, task_pid_nr(current), current->comm, task_thread_info(current));
 
 #ifdef CONFIG_SMP
 	printk(" CPU: %d", raw_smp_processor_id());

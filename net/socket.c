@@ -98,10 +98,6 @@
 
 #include <net/sock.h>
 #include <linux/netfilter.h>
-#include <linux/vs_base.h>
-#include <linux/vs_socket.h>
-#include <linux/vs_inet.h>
-#include <linux/vs_inet6.h>
 
 #include <linux/if_tun.h>
 #include <linux/ipv6_route.h>
@@ -552,7 +548,6 @@ static inline int __sock_sendmsg_nosec(struct kiocb *iocb, struct socket *sock,
 				       struct msghdr *msg, size_t size)
 {
 	struct sock_iocb *si = kiocb_to_siocb(iocb);
-	size_t len;
 
 	sock_update_classid(sock->sk);
 
@@ -563,22 +558,7 @@ static inline int __sock_sendmsg_nosec(struct kiocb *iocb, struct socket *sock,
 	si->msg = msg;
 	si->size = size;
 
-	len = sock->ops->sendmsg(iocb, sock, msg, size);
-	if (sock->sk) {
-		if (len == size)
-			vx_sock_send(sock->sk, size);
-		else
-			vx_sock_fail(sock->sk, size);
-	}
-	vxdprintk(VXD_CBIT(net, 7),
-		"__sock_sendmsg: %p[%p,%p,%p;%d/%d]:%d/%zu",
-		sock, sock->sk,
-		(sock->sk)?sock->sk->sk_nx_info:0,
-		(sock->sk)?sock->sk->sk_vx_info:0,
-		(sock->sk)?sock->sk->sk_xid:0,
-		(sock->sk)?sock->sk->sk_nid:0,
-		(unsigned int)size, len);
-	return len;
+	return sock->ops->sendmsg(iocb, sock, msg, size);
 }
 
 static inline int __sock_sendmsg(struct kiocb *iocb, struct socket *sock,
@@ -734,7 +714,6 @@ static inline int __sock_recvmsg_nosec(struct kiocb *iocb, struct socket *sock,
 				       struct msghdr *msg, size_t size, int flags)
 {
 	struct sock_iocb *si = kiocb_to_siocb(iocb);
-	int len;
 
 	sock_update_classid(sock->sk);
 
@@ -744,18 +723,7 @@ static inline int __sock_recvmsg_nosec(struct kiocb *iocb, struct socket *sock,
 	si->size = size;
 	si->flags = flags;
 
-	len = sock->ops->recvmsg(iocb, sock, msg, size, flags);
-	if ((len >= 0) && sock->sk)
-		vx_sock_recv(sock->sk, len);
-	vxdprintk(VXD_CBIT(net, 7),
-		"__sock_recvmsg: %p[%p,%p,%p;%d/%d]:%d/%d",
-		sock, sock->sk,
-		(sock->sk)?sock->sk->sk_nx_info:0,
-		(sock->sk)?sock->sk->sk_vx_info:0,
-		(sock->sk)?sock->sk->sk_xid:0,
-		(sock->sk)?sock->sk->sk_nid:0,
-		(unsigned int)size, len);
-	return len;
+	return sock->ops->recvmsg(iocb, sock, msg, size, flags);
 }
 
 static inline int __sock_recvmsg(struct kiocb *iocb, struct socket *sock,
@@ -1240,13 +1208,6 @@ int __sock_create(struct net *net, int family, int type, int protocol,
 	if (type < 0 || type >= SOCK_MAX)
 		return -EINVAL;
 
-	if (!nx_check(0, VS_ADMIN)) {
-		if (family == PF_INET && !current_nx_info_has_v4())
-			return -EAFNOSUPPORT;
-		if (family == PF_INET6 && !current_nx_info_has_v6())
-			return -EAFNOSUPPORT;
-	}
-
 	/* Compatibility.
 
 	   This uglymoron is moved from INET layer to here to avoid
@@ -1382,7 +1343,6 @@ SYSCALL_DEFINE3(socket, int, family, int, type, int, protocol)
 	if (retval < 0)
 		goto out;
 
-	set_bit(SOCK_USER_SOCKET, &sock->flags);
 	retval = sock_map_fd(sock, flags & (O_CLOEXEC | O_NONBLOCK));
 	if (retval < 0)
 		goto out_release;
@@ -1424,12 +1384,10 @@ SYSCALL_DEFINE4(socketpair, int, family, int, type, int, protocol,
 	err = sock_create(family, type, protocol, &sock1);
 	if (err < 0)
 		goto out;
-	set_bit(SOCK_USER_SOCKET, &sock1->flags);
 
 	err = sock_create(family, type, protocol, &sock2);
 	if (err < 0)
 		goto out_release_1;
-	set_bit(SOCK_USER_SOCKET, &sock2->flags);
 
 	err = sock1->ops->socketpair(sock1, sock2);
 	if (err < 0)

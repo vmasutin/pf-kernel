@@ -684,13 +684,6 @@ typedef struct pglist_data {
 	__pgdat->node_start_pfn + __pgdat->node_spanned_pages;\
 })
 
-#define node_start_pfn(nid)	(NODE_DATA(nid)->node_start_pfn)
-
-#define node_end_pfn(nid) ({\
-	pg_data_t *__pgdat = NODE_DATA(nid);\
-	__pgdat->node_start_pfn + __pgdat->node_spanned_pages;\
-})
-
 #include <linux/memory_hotplug.h>
 
 extern struct mutex zonelists_mutex;

@@ -4,7 +4,6 @@
 #include <linux/socket.h>
 #include <linux/un.h>
 #include <linux/mutex.h>
-#include <linux/vs_base.h>
 #include <net/sock.h>
 
 extern void unix_inflight(struct file *fp);

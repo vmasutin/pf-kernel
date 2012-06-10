@@ -39,8 +39,7 @@ static int meminfo_proc_show(struct seq_file *m, void *v)
 	allowed = ((totalram_pages - hugetlb_total_pages())
 		* sysctl_overcommit_ratio / 100) + total_swap_pages;
 
-	cached = vx_flags(VXF_VIRT_MEM, 0) ?
-		vx_vsi_cached(&i) : global_page_state(NR_FILE_PAGES) -
+	cached = global_page_state(NR_FILE_PAGES) -
 			total_swapcache_pages - i.bufferram;
 	if (cached < 0)
 		cached = 0;

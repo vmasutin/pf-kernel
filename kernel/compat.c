@@ -1054,7 +1054,7 @@ asmlinkage long compat_sys_stime(compat_time_t __user *tptr)
 	if (err)
 		return err;
 
-	vx_settimeofday(&tv);
+	do_settimeofday(&tv);
 	return 0;
 }
 

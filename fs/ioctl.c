@@ -15,9 +15,6 @@
 #include <linux/writeback.h>
 #include <linux/buffer_head.h>
 #include <linux/falloc.h>
-#include <linux/proc_fs.h>
-#include <linux/vserver/inode.h>
-#include <linux/vs_tag.h>
 
 #include <asm/ioctls.h>
 

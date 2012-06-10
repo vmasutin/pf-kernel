@@ -25,7 +25,6 @@ endif
 obj-y += sched/
 obj-y += power/
 
-obj-y += vserver/
 obj-$(CONFIG_FREEZER) += freezer.o
 obj-$(CONFIG_PROFILING) += profile.o
 obj-$(CONFIG_STACKTRACE) += stacktrace.o

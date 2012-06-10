@@ -1476,14 +1476,6 @@ struct task_struct {
 #endif
 	seccomp_t seccomp;
 
-/* vserver context data */
-	struct vx_info *vx_info;
-	struct nx_info *nx_info;
-
-	xid_t xid;
-	nid_t nid;
-	tag_t tag;
-
 /* Thread group tracking */
    	u32 parent_exec_id;
    	u32 self_exec_id;
@@ -1796,11 +1788,6 @@ struct pid_namespace;
 pid_t __task_pid_nr_ns(struct task_struct *task, enum pid_type type,
 			struct pid_namespace *ns);
 
-#include <linux/vserver/base.h>
-#include <linux/vserver/context.h>
-#include <linux/vserver/debug.h>
-#include <linux/vserver/pid.h>
-
 static inline pid_t task_pid_nr(struct task_struct *tsk)
 {
 	return tsk->pid;
@@ -1814,8 +1801,7 @@ static inline pid_t task_pid_nr_ns(struct task_struct *tsk,
 
 static inline pid_t task_pid_vnr(struct task_struct *tsk)
 {
-	// return __task_pid_nr_ns(tsk, PIDTYPE_PID, NULL);
-	return vx_map_pid(__task_pid_nr_ns(tsk, PIDTYPE_PID, NULL));
+	return __task_pid_nr_ns(tsk, PIDTYPE_PID, NULL);
 }
 
 
@@ -1828,7 +1814,7 @@ pid_t task_tgid_nr_ns(struct task_struct *tsk, struct pid_namespace *ns);
 
 static inline pid_t task_tgid_vnr(struct task_struct *tsk)
 {
-	return vx_map_tgid(pid_vnr(task_tgid(tsk)));
+	return pid_vnr(task_tgid(tsk));
 }
 
 

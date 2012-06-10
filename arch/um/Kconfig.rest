@@ -12,8 +12,6 @@ source "arch/um/Kconfig.net"
 
 source "fs/Kconfig"
 
-source "kernel/vserver/Kconfig"
-
 source "security/Kconfig"
 
 source "crypto/Kconfig"

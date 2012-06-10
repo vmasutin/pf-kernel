@@ -30,11 +30,6 @@
 #include <linux/fs_struct.h>
 #include <linux/ima.h>
 #include <linux/dnotify.h>
-#include <linux/vs_base.h>
-#include <linux/vs_limit.h>
-#include <linux/vs_tag.h>
-#include <linux/vs_cowbl.h>
-#include <linux/vserver/dlimit.h>
 
 #include "internal.h"
 
@@ -79,12 +74,6 @@ static long do_sys_truncate(const char __user *pathname, loff_t length)
 	error = user_path(pathname, &path);
 	if (error)
 		goto out;
-
-#ifdef CONFIG_VSERVER_COWBL
-	error = cow_check_and_break(&path);
-	if (error)
-		goto dput_and_out;
-#endif
 	inode = path.dentry->d_inode;
 
 	/* For directories it's -EISDIR, for other non-regulars - -EINVAL */
@@ -500,10 +489,6 @@ SYSCALL_DEFINE3(fchmodat, int, dfd, const char __user *, filename, umode_t, mode
 
 	error = user_path_at(dfd, filename, LOOKUP_FOLLOW, &path);
 	if (!error) {
-#ifdef CONFIG_VSERVER_COWBL
-		error = cow_check_and_break(&path);
-		if (!error)
-#endif
 		error = chmod_common(&path, mode);
 		path_put(&path);
 	}
@@ -524,11 +509,11 @@ static int chown_common(struct path *path, uid_t user, gid_t group)
 	newattrs.ia_valid =  ATTR_CTIME;
 	if (user != (uid_t) -1) {
 		newattrs.ia_valid |= ATTR_UID;
-		newattrs.ia_uid = dx_map_uid(user);
+		newattrs.ia_uid = user;
 	}
 	if (group != (gid_t) -1) {
 		newattrs.ia_valid |= ATTR_GID;
-		newattrs.ia_gid = dx_map_gid(group);
+		newattrs.ia_gid = group;
 	}
 	if (!S_ISDIR(inode->i_mode))
 		newattrs.ia_valid |=
@@ -553,10 +538,6 @@ SYSCALL_DEFINE3(chown, const char __user *, filename, uid_t, user, gid_t, group)
 	error = mnt_want_write(path.mnt);
 	if (error)
 		goto out_release;
-#ifdef CONFIG_VSERVER_COWBL
-	error = cow_check_and_break(&path);
-	if (!error)
-#endif
 	error = chown_common(&path, user, group);
 	mnt_drop_write(path.mnt);
 out_release:
@@ -584,10 +565,6 @@ SYSCALL_DEFINE5(fchownat, int, dfd, const char __user *, filename, uid_t, user,
 	error = mnt_want_write(path.mnt);
 	if (error)
 		goto out_release;
-#ifdef CONFIG_VSERVER_COWBL
-	error = cow_check_and_break(&path);
-	if (!error)
-#endif
 	error = chown_common(&path, user, group);
 	mnt_drop_write(path.mnt);
 out_release:
@@ -607,10 +584,6 @@ SYSCALL_DEFINE3(lchown, const char __user *, filename, uid_t, user, gid_t, group
 	error = mnt_want_write(path.mnt);
 	if (error)
 		goto out_release;
-#ifdef CONFIG_VSERVER_COWBL
-	error = cow_check_and_break(&path);
-	if (!error)
-#endif
 	error = chown_common(&path, user, group);
 	mnt_drop_write(path.mnt);
 out_release:
@@ -866,7 +839,6 @@ static void __put_unused_fd(struct files_struct *files, unsigned int fd)
 	__clear_open_fd(fd, fdt);
 	if (fd < files->next_fd)
 		files->next_fd = fd;
-	vx_openfd_dec(fd);
 }
 
 void put_unused_fd(unsigned int fd)

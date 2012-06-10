@@ -170,10 +170,6 @@ struct sock_common {
 #ifdef CONFIG_NET_NS
 	struct net	 	*skc_net;
 #endif
-	xid_t			skc_xid;
-	struct vx_info		*skc_vx_info;
-	nid_t			skc_nid;
-	struct nx_info		*skc_nx_info;
 	/*
 	 * fields between dontcopy_begin/dontcopy_end
 	 * are not copied in sock_copy()
@@ -285,10 +281,6 @@ struct sock {
 #define sk_bind_node		__sk_common.skc_bind_node
 #define sk_prot			__sk_common.skc_prot
 #define sk_net			__sk_common.skc_net
-#define sk_xid			__sk_common.skc_xid
-#define sk_vx_info		__sk_common.skc_vx_info
-#define sk_nid			__sk_common.skc_nid
-#define sk_nx_info		__sk_common.skc_nx_info
 	socket_lock_t		sk_lock;
 	struct sk_buff_head	sk_receive_queue;
 	/*

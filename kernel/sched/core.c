@@ -72,8 +72,6 @@
 #include <linux/slab.h>
 #include <linux/init_task.h>
 #include <linux/binfmts.h>
-#include <linux/vs_sched.h>
-#include <linux/vs_cvirt.h>
 
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
@@ -2361,17 +2359,9 @@ static void calc_global_nohz(void)
  */
 void get_avenrun(unsigned long *loads, unsigned long offset, int shift)
 {
-	if (vx_flags(VXF_VIRT_LOAD, 0)) {
-		struct vx_info *vxi = current_vx_info();
-
-		loads[0] = (vxi->cvirt.load[0] + offset) << shift;
-		loads[1] = (vxi->cvirt.load[1] + offset) << shift;
-		loads[2] = (vxi->cvirt.load[2] + offset) << shift;
-	} else {
-		loads[0] = (avenrun[0] + offset) << shift;
-		loads[1] = (avenrun[1] + offset) << shift;
-		loads[2] = (avenrun[2] + offset) << shift;
-	}
+	loads[0] = (avenrun[0] + offset) << shift;
+	loads[1] = (avenrun[1] + offset) << shift;
+	loads[2] = (avenrun[2] + offset) << shift;
 }
 
 /*
@@ -2675,17 +2665,14 @@ static inline void task_group_account_field(struct task_struct *p, int index,
 void account_user_time(struct task_struct *p, cputime_t cputime,
 		       cputime_t cputime_scaled)
 {
-	struct vx_info *vxi = p->vx_info;  /* p is _always_ current */
-	int nice = (TASK_NICE(p) > 0);
 	int index;
 
 	/* Add user time to process. */
 	p->utime += cputime;
 	p->utimescaled += cputime_scaled;
-	vx_account_user(vxi, cputime, nice);
 	account_group_user_time(p, cputime);
 
-	index = (nice) ? CPUTIME_NICE : CPUTIME_USER;
+	index = (TASK_NICE(p) > 0) ? CPUTIME_NICE : CPUTIME_USER;
 
 	/* Add user time to cpustat. */
 	task_group_account_field(p, index, (__force u64) cputime);
@@ -2732,12 +2719,9 @@ static inline
 void __account_system_time(struct task_struct *p, cputime_t cputime,
 			cputime_t cputime_scaled, int index)
 {
-	struct vx_info *vxi = p->vx_info;  /* p is _always_ current */
-
 	/* Add system time to process. */
 	p->stime += cputime;
 	p->stimescaled += cputime_scaled;
-	vx_account_system(vxi, cputime, 0 /* do we have idle time? */);
 	account_group_system_time(p, cputime);
 
 	/* Add system time to cpustat. */
@@ -3957,7 +3941,7 @@ SYSCALL_DEFINE1(nice, int, increment)
 		nice = 19;
 
 	if (increment < 0 && !can_nice(current, nice))
-		return vx_flags(VXF_IGNEG_NICE, 0) ? 0 : -EPERM;
+		return -EPERM;
 
 	retval = security_task_setnice(current, nice);
 	if (retval)

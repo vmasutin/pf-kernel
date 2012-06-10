@@ -135,8 +135,7 @@ static inline unsigned char dt_type(struct inode *inode)
  * both impossible due to the lock on directory.
  */
 
-static inline int do_dcache_readdir_filter(struct file *filp,
-	void *dirent, filldir_t filldir, int (*filter)(struct dentry *dentry))
+int dcache_readdir(struct file * filp, void * dirent, filldir_t filldir)
 {
 	struct dentry *dentry = filp->f_path.dentry;
 	struct dentry *cursor = filp->private_data;
@@ -167,8 +166,6 @@ static inline int do_dcache_readdir_filter(struct file *filp,
 			for (p=q->next; p != &dentry->d_subdirs; p=p->next) {
 				struct dentry *next;
 				next = list_entry(p, struct dentry, d_u.d_child);
-				if (filter && !filter(next))
-					continue;
 				spin_lock_nested(&next->d_lock, DENTRY_D_LOCK_NESTED);
 				if (!simple_positive(next)) {
 					spin_unlock(&next->d_lock);
@@ -193,17 +190,6 @@ static inline int do_dcache_readdir_filter(struct file *filp,
 			spin_unlock(&dentry->d_lock);
 	}
 	return 0;
-}
-
-int dcache_readdir(struct file *filp, void *dirent, filldir_t filldir)
-{
-	return do_dcache_readdir_filter(filp, dirent, filldir, NULL);
-}
-
-int dcache_readdir_filter(struct file *filp, void *dirent, filldir_t filldir,
-	int (*filter)(struct dentry *))
-{
-	return do_dcache_readdir_filter(filp, dirent, filldir, filter);
 }
 
 ssize_t generic_read_dir(struct file *filp, char __user *buf, size_t siz, loff_t *ppos)
@@ -997,7 +983,6 @@ EXPORT_SYMBOL(dcache_dir_close);
 EXPORT_SYMBOL(dcache_dir_lseek);
 EXPORT_SYMBOL(dcache_dir_open);
 EXPORT_SYMBOL(dcache_readdir);
-EXPORT_SYMBOL(dcache_readdir_filter);
 EXPORT_SYMBOL(generic_read_dir);
 EXPORT_SYMBOL(mount_pseudo);
 EXPORT_SYMBOL(simple_write_begin);

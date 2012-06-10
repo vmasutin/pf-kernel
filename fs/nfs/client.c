@@ -802,9 +802,6 @@ static int nfs_init_server_rpcclient(struct nfs_server *server,
 	if (server->flags & NFS_MOUNT_SOFT)
 		server->client->cl_softrtry = 1;
 
-	server->client->cl_tag = 0;
-	if (server->flags & NFS_MOUNT_TAGGED)
-		server->client->cl_tag = 1;
 	return 0;
 }
 
@@ -979,10 +976,6 @@ static void nfs_server_set_fsinfo(struct nfs_server *server,
 		server->acregmin = server->acregmax = 0;
 		server->acdirmin = server->acdirmax = 0;
 	}
-
-	/* FIXME: needs fsinfo
-	if (server->flags & NFS_MOUNT_TAGGED)
-		sb->s_flags |= MS_TAGGED;	*/
 
 	server->maxfilesize = fsinfo->maxfilesize;
 

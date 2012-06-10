@@ -47,9 +47,6 @@ struct mnt_namespace;
 
 #define MNT_INTERNAL	0x4000
 
-#define MNT_TAGID	0x10000
-#define MNT_NOTAG	0x20000
-
 struct vfsmount {
 	struct dentry *mnt_root;	/* root of the mounted tree */
 	struct super_block *mnt_sb;	/* pointer to superblock */

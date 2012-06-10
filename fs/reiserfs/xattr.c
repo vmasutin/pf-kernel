@@ -40,7 +40,6 @@
 #include <linux/errno.h>
 #include <linux/gfp.h>
 #include <linux/fs.h>
-#include <linux/mount.h>
 #include <linux/file.h>
 #include <linux/pagemap.h>
 #include <linux/xattr.h>

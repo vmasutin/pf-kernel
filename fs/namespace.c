@@ -20,11 +20,6 @@
 #include <linux/fs_struct.h>	/* get_fs_root et.al. */
 #include <linux/fsnotify.h>	/* fsnotify_vfsmount_delete */
 #include <linux/uaccess.h>
-#include <linux/vs_base.h>
-#include <linux/vs_context.h>
-#include <linux/vs_tag.h>
-#include <linux/vserver/space.h>
-#include <linux/vserver/global.h>
 #include "pnode.h"
 #include "internal.h"
 
@@ -702,10 +697,6 @@ vfs_kern_mount(struct file_system_type *type, int flags, const char *name, void 
 	if (!type)
 		return ERR_PTR(-ENODEV);
 
-	if ((type->fs_flags & FS_BINARY_MOUNTDATA) &&
-		!vx_capable(CAP_SYS_ADMIN, VXC_BINARY_MOUNT))
-		return ERR_PTR(-EPERM);
-
 	mnt = alloc_vfsmnt(name);
 	if (!mnt)
 		return ERR_PTR(-ENOMEM);
@@ -754,7 +745,6 @@ static struct mount *clone_mnt(struct mount *old, struct dentry *root,
 		mnt->mnt.mnt_root = dget(root);
 		mnt->mnt_mountpoint = mnt->mnt.mnt_root;
 		mnt->mnt_parent = mnt;
-		mnt->mnt_tag = old->mnt_tag;
 		br_write_lock(vfsmount_lock);
 		list_add_tail(&mnt->mnt_instance, &sb->s_mounts);
 		br_write_unlock(vfsmount_lock);
@@ -1220,7 +1210,7 @@ SYSCALL_DEFINE2(umount, char __user *, name, int, flags)
 		goto dput_and_out;
 
 	retval = -EPERM;
-	if (!vx_capable(CAP_SYS_ADMIN, VXC_SECURE_MOUNT))
+	if (!capable(CAP_SYS_ADMIN))
 		goto dput_and_out;
 
 	retval = do_umount(mnt, flags);
@@ -1246,7 +1236,7 @@ SYSCALL_DEFINE1(oldumount, char __user *, name)
 
 static int mount_is_safe(struct path *path)
 {
-	if (vx_capable(CAP_SYS_ADMIN, VXC_SECURE_MOUNT))
+	if (capable(CAP_SYS_ADMIN))
 		return 0;
 	return -EPERM;
 #ifdef notyet
@@ -1559,7 +1549,7 @@ static int do_change_type(struct path *path, int flag)
 	int type;
 	int err = 0;
 
-	if (!vx_capable(CAP_SYS_ADMIN, VXC_NAMESPACE))
+	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	if (path->dentry != path->mnt->mnt_root)
@@ -1575,7 +1565,6 @@ static int do_change_type(struct path *path, int flag)
 		if (err)
 			goto out_unlock;
 	}
-	// mnt->mnt_flags = mnt_flags;
 
 	br_write_lock(vfsmount_lock);
 	for (m = mnt; m; m = (recurse ? next_mnt(m, mnt) : NULL))
@@ -1591,14 +1580,12 @@ static int do_change_type(struct path *path, int flag)
  * do loopback mount.
  */
 static int do_loopback(struct path *path, char *old_name,
-	tag_t tag, unsigned long flags, int mnt_flags)
+				int recurse)
 {
 	LIST_HEAD(umount_list);
 	struct path old_path;
 	struct mount *mnt = NULL, *old;
 	int err = mount_is_safe(path);
-	int recurse = flags & MS_REC;
-
 	if (err)
 		return err;
 	if (!old_name || !*old_name)
@@ -1666,13 +1653,13 @@ static int change_mount_flags(struct vfsmount *mnt, int ms_flags)
  * on it - tough luck.
  */
 static int do_remount(struct path *path, int flags, int mnt_flags,
-	void *data, xid_t xid)
+		      void *data)
 {
 	int err;
 	struct super_block *sb = path->mnt->mnt_sb;
 	struct mount *mnt = real_mount(path->mnt);
 
-	if (!vx_capable(CAP_SYS_ADMIN, VXC_SECURE_REMOUNT))
+	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	if (!check_mnt(mnt))
@@ -1721,7 +1708,7 @@ static int do_move_mount(struct path *path, char *old_name)
 	struct mount *p;
 	struct mount *old;
 	int err = 0;
-	if (!vx_capable(CAP_SYS_ADMIN, VXC_SECURE_MOUNT))
+	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 	if (!old_name || !*old_name)
 		return -EINVAL;
@@ -1872,7 +1859,7 @@ static int do_new_mount(struct path *path, char *type, int flags,
 		return -EINVAL;
 
 	/* we need capabilities... */
-	if (!vx_capable(CAP_SYS_ADMIN, VXC_SECURE_MOUNT))
+	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	mnt = do_kern_mount(type, flags, name, data);
@@ -2142,7 +2129,6 @@ long do_mount(char *dev_name, char *dir_name, char *type_page,
 	struct path path;
 	int retval = 0;
 	int mnt_flags = 0;
-	tag_t tag = 0;
 
 	/* Discard magic */
 	if ((flags & MS_MGC_MSK) == MS_MGC_VAL)
@@ -2170,12 +2156,6 @@ long do_mount(char *dev_name, char *dir_name, char *type_page,
 	if (!(flags & MS_NOATIME))
 		mnt_flags |= MNT_RELATIME;
 
-	if (dx_parse_tag(data_page, &tag, 1, &mnt_flags, &flags)) {
-		/* FIXME: bind and re-mounts get the tag flag? */
-		if (flags & (MS_BIND|MS_REMOUNT))
-			flags |= MS_TAGID;
-	}
-
 	/* Separate the per-mountpoint flags */
 	if (flags & MS_NOSUID)
 		mnt_flags |= MNT_NOSUID;
@@ -2192,17 +2172,15 @@ long do_mount(char *dev_name, char *dir_name, char *type_page,
 	if (flags & MS_RDONLY)
 		mnt_flags |= MNT_READONLY;
 
-	if (!capable(CAP_SYS_ADMIN))
-		mnt_flags |= MNT_NODEV;
 	flags &= ~(MS_NOSUID | MS_NOEXEC | MS_NODEV | MS_ACTIVE | MS_BORN |
 		   MS_NOATIME | MS_NODIRATIME | MS_RELATIME| MS_KERNMOUNT |
 		   MS_STRICTATIME);
 
 	if (flags & MS_REMOUNT)
 		retval = do_remount(&path, flags & ~MS_REMOUNT, mnt_flags,
-				    data_page, tag);
+				    data_page);
 	else if (flags & MS_BIND)
-		retval = do_loopback(&path, dev_name, tag, flags, mnt_flags);
+		retval = do_loopback(&path, dev_name, flags & MS_REC);
 	else if (flags & (MS_SHARED | MS_PRIVATE | MS_SLAVE | MS_UNBINDABLE))
 		retval = do_change_type(&path, flags);
 	else if (flags & MS_MOVE)
@@ -2305,7 +2283,6 @@ static struct mnt_namespace *dup_mnt_ns(struct mnt_namespace *mnt_ns,
 		q = next_mnt(q, new);
 	}
 	up_write(&namespace_sem);
-	atomic_inc(&vs_global_mnt_ns);
 
 	if (rootmnt)
 		mntput(rootmnt);
@@ -2502,10 +2479,9 @@ SYSCALL_DEFINE2(pivot_root, const char __user *, new_root,
 	error = -EINVAL;
 	new_mnt = real_mount(new.mnt);
 	root_mnt = real_mount(root.mnt);
-	if ((IS_MNT_SHARED(real_mount(old.mnt)) ||
+	if (IS_MNT_SHARED(real_mount(old.mnt)) ||
 		IS_MNT_SHARED(new_mnt->mnt_parent) ||
-		IS_MNT_SHARED(root_mnt->mnt_parent)) &&
-		!vx_flags(VXF_STATE_SETUP, 0))
+		IS_MNT_SHARED(root_mnt->mnt_parent))
 		goto out4;
 	if (!check_mnt(root_mnt) || !check_mnt(new_mnt))
 		goto out4;
@@ -2626,7 +2602,6 @@ void put_mnt_ns(struct mnt_namespace *ns)
 	br_write_unlock(vfsmount_lock);
 	up_write(&namespace_sem);
 	release_mounts(&umount_list);
-	atomic_dec(&vs_global_mnt_ns);
 	kfree(ns);
 }
 

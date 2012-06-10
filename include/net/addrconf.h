@@ -80,8 +80,7 @@ extern int			ipv6_dev_get_saddr(struct net *net,
 					       struct net_device *dev,
 					       const struct in6_addr *daddr,
 					       unsigned int srcprefs,
-					       struct in6_addr *saddr,
-					       struct nx_info *nxi);
+					       struct in6_addr *saddr);
 extern int			ipv6_get_lladdr(struct net_device *dev,
 						struct in6_addr *addr,
 						unsigned char banned_flags);

@@ -92,7 +92,7 @@ SYSCALL_DEFINE1(stime, time_t __user *, tptr)
 	if (err)
 		return err;
 
-	vx_settimeofday(&tv);
+	do_settimeofday(&tv);
 	return 0;
 }
 
@@ -172,7 +172,7 @@ int do_sys_settimeofday(const struct timespec *tv, const struct timezone *tz)
 		}
 	}
 	if (tv)
-		return vx_settimeofday(tv);
+		return do_settimeofday(tv);
 	return 0;
 }
 

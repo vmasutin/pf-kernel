@@ -17,16 +17,6 @@
 #include <asm/uaccess.h>
 
 
-int ext2_sync_flags(struct inode *inode, int flags, int vflags)
-{
-	inode->i_flags = flags;
-	inode->i_vflags = vflags;
-	ext2_get_inode_flags(EXT2_I(inode));
-	inode->i_ctime = CURRENT_TIME_SEC;
-	mark_inode_dirty(inode);
-	return 0;
-}
-
 long ext2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	struct inode *inode = filp->f_dentry->d_inode;
@@ -61,11 +51,6 @@ long ext2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 
 		flags = ext2_mask_flags(inode->i_mode, flags);
 
-		if (IS_BARRIER(inode)) {
-			vxwprintk_task(1, "messing with the barrier.");
-			return -EACCES;
-		}
-
 		mutex_lock(&inode->i_mutex);
 		/* Is it quota file? Do not allow user to mess with it */
 		if (IS_NOQUOTA(inode)) {
@@ -81,9 +66,7 @@ long ext2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		 *
 		 * This test looks nicer. Thanks to Pauline Middelink
 		 */
-		if ((oldflags & EXT2_IMMUTABLE_FL) ||
-			((flags ^ oldflags) & (EXT2_APPEND_FL |
-			EXT2_IMMUTABLE_FL | EXT2_IXUNLINK_FL))) {
+		if ((flags ^ oldflags) & (EXT2_APPEND_FL | EXT2_IMMUTABLE_FL)) {
 			if (!capable(CAP_LINUX_IMMUTABLE)) {
 				mutex_unlock(&inode->i_mutex);
 				ret = -EPERM;
@@ -91,7 +74,7 @@ long ext2_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 			}
 		}
 
-		flags &= EXT2_FL_USER_MODIFIABLE;
+		flags = flags & EXT2_FL_USER_MODIFIABLE;
 		flags |= oldflags & ~EXT2_FL_USER_MODIFIABLE;
 		ei->i_flags = flags;
 
