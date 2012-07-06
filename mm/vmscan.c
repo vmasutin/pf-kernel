@@ -1980,8 +1980,8 @@ static inline bool should_continue_reclaim(struct zone *zone,
 	unsigned long pages_for_compaction;
 	unsigned long inactive_lru_pages;
 
-  if (sc->hibernation_mode && nr_reclaimed && nr_scanned && sc->nr_to_reclaim >= sc->nr_reclaimed)
-    return true;
+	if (sc->hibernation_mode && nr_reclaimed && nr_scanned && sc->nr_to_reclaim >= sc->nr_reclaimed)
+		return true;
 
 	/* If not in reclaim/compaction mode, stop */
 	if (!(sc->reclaim_mode & RECLAIM_MODE_COMPACTION))
@@ -2223,8 +2223,10 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	struct zone *zone;
 	unsigned long writeback_threshold;
 
-  if (unlikely(freezer_is_on()))
-    return 0;
+#ifdef CONFIG_FREEZER
+	if (unlikely(freezer_is_on() && !sc->hibernation_mode))
+		return 0;
+#endif
 
 	get_mems_allowed();
 	delayacct_freepages_start();
