@@ -1355,6 +1355,7 @@ void kernel_map_pages(struct page *page, int numpages, int enable)
 	 */
 	__flush_tlb_all();
 }
+
 EXPORT_SYMBOL_GPL(kernel_map_pages);
 
 #ifdef CONFIG_HIBERNATION

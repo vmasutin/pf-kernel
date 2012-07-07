@@ -1568,7 +1568,7 @@ static int cleaner_kthread(void *arg)
 {
 	struct btrfs_root *root = arg;
 
-  set_freezable();
+	set_freezable();
 
 	do {
 		vfs_check_frozen(root->fs_info->sb, SB_FREEZE_WRITE);
@@ -1603,7 +1603,7 @@ static int transaction_kthread(void *arg)
 	unsigned long delay;
 	int ret;
 
-  set_freezable();
+	set_freezable();
 
 	do {
 		delay = HZ * 30;
