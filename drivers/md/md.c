@@ -7104,13 +7104,13 @@ void md_do_sync(struct mddev *mddev)
 	 *
 	 */
 
-  set_freezable();
+	set_freezable();
 
 	do {
 		mddev->curr_resync = 2;
 
 	try_again:
-    try_to_freeze();
+	try_to_freeze();
 
 		if (kthread_should_stop())
 			set_bit(MD_RECOVERY_INTR, &mddev->recovery);
@@ -7135,7 +7135,7 @@ void md_do_sync(struct mddev *mddev)
 					 */
 					continue;
 
-        try_to_freeze();
+				try_to_freeze();
 
 				/* We need to wait 'interruptible' so as not to
 				 * contribute to the load average, and not to
@@ -7257,7 +7257,7 @@ void md_do_sync(struct mddev *mddev)
 						 || kthread_should_stop());
 		}
 
-    try_to_freeze();
+		try_to_freeze();
 
 		if (kthread_should_stop())
 			goto interrupted;
@@ -7302,7 +7302,7 @@ void md_do_sync(struct mddev *mddev)
 			last_mark = next;
 		}
 
-    try_to_freeze();
+		try_to_freeze();
 
 		if (kthread_should_stop())
 			goto interrupted;
