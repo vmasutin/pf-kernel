@@ -42,8 +42,6 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_complete);
 int trap_non_toi_io;
 EXPORT_SYMBOL_GPL(trap_non_toi_io);
 
-static int __make_request(struct request_queue *q, struct bio *bio);
-
 /*
  * For the allocated request tables
  */
