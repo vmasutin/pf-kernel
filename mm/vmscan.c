@@ -2024,8 +2024,8 @@ static inline bool should_continue_reclaim(struct mem_cgroup_zone *mz,
 	unsigned long pages_for_compaction;
 	unsigned long inactive_lru_pages;
 
-  if (sc->hibernation_mode && nr_reclaimed && nr_scanned && sc->nr_to_reclaim >= sc->nr_reclaimed)
-    return true;
+	if (sc->hibernation_mode && nr_reclaimed && nr_scanned && sc->nr_to_reclaim >= sc->nr_reclaimed)
+		return true;
 
 	/* If not in reclaim/compaction mode, stop */
 	if (!(sc->reclaim_mode & RECLAIM_MODE_COMPACTION))
@@ -2378,7 +2378,7 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	bool aborted_reclaim;
 
 #ifdef CONFIG_FREEZER
-	if (unlikely(pm_freezing))
+	if (unlikely(pm_freezing && !sc->hibernation_mode))
 		return 0;
 #endif
 
