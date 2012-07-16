@@ -1,6 +1,6 @@
 pkgname=kernel34-pf
-basekernel=3.4.4
-pkgver=3.4.4
+basekernel=3.4.5
+pkgver=3.4.5
 pkgrel=pf
 pkgdesc="The Linux Kernel and modules"
 arch=('i686' 'x86_64')
