@@ -1,0 +1,46 @@
+pkgname=kernel34-pf
+basekernel=3.4.6
+pkgver=3.4.6
+pkgrel=pf
+pkgdesc="The Linux Kernel and modules"
+arch=('i686' 'x86_64')
+license=('GPL')
+url="http://pf.natalenko.name"
+depends=('kmod' 'mkinitcpio')
+provides=(kernel34)
+install=kernel34.install
+
+build() {
+  LOCAL_VERSION=-$pkgrel
+
+  # Go to kernel's tree root
+  cd ..
+
+  # Remove depmod from kernel script, steal this trick from Arch
+  sed -i '2iexit 0' scripts/depmod.sh
+
+  # Should be changed to detect CPU count automatically
+  make -j2 || return 1
+
+  # Note that modules are in /usr/lib/modules now
+  mkdir -p $startdir/pkg/{usr/lib/modules,boot}
+  make INSTALL_MOD_PATH=$startdir/pkg/usr modules_install || return 1
+
+  # Running depmod for installed modules
+  depmod -b "$pkgdir" -F System.map "$pkgver-$pkgrel"
+
+  # There's no separation of firmware depending on kernel version - 
+  # comment this line if you intend on using the built kernel exclusively,
+  # otherwise there'll be file conflicts with the existing kernel
+  rm -rf $startdir/pkg/lib/firmware
+
+  install -Dm644 "System.map" "$startdir/pkg/boot/System.map34$LOCAL_VERSION"
+  install -Dm644 "arch/x86/boot/bzImage" "$startdir/pkg/boot/vmlinuz34$LOCAL_VERSION"
+
+  # Change the version strings in kernel34.install
+  sed -i \
+	-e "s/KERNEL_VERSION=.*/KERNEL_VERSION=\"$basekernel\"/" \
+	-e "s/LOCAL_VERSION=.*/LOCAL_VERSION=\"$LOCAL_VERSION\"/" \
+	$startdir/kernel34.install
+}
+
