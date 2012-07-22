@@ -1532,6 +1532,8 @@ static int cleaner_kthread(void *arg)
 {
 	struct btrfs_root *root = arg;
 
+	set_freezable();
+
 	do {
 		vfs_check_frozen(root->fs_info->sb, SB_FREEZE_WRITE);
 
@@ -1562,6 +1564,8 @@ static int transaction_kthread(void *arg)
 	unsigned long now;
 	unsigned long delay;
 	bool cannot_commit;
+
+	set_freezable();
 
 	do {
 		cannot_commit = false;
