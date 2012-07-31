@@ -2695,10 +2695,12 @@ done:
 static int
 select_task_rq_fair(struct task_struct *p, int sd_flag, int wake_flags)
 {
+	int new_cpu = 0;
+#ifndef CONFIG_BLD
 	struct sched_domain *tmp, *affine_sd = NULL, *sd = NULL;
 	int cpu = smp_processor_id();
 	int prev_cpu = task_cpu(p);
-	int new_cpu = cpu;
+	new_cpu = cpu;
 	int want_affine = 0;
 	int want_sd = 1;
 	int sync = wake_flags & WF_SYNC;
@@ -2806,7 +2808,7 @@ select_task_rq_fair(struct task_struct *p, int sd_flag, int wake_flags)
 	}
 unlock:
 	rcu_read_unlock();
-
+#endif
 	return new_cpu;
 }
 #endif /* CONFIG_SMP */
@@ -4614,6 +4616,7 @@ void set_cpu_sd_state_idle(void)
  */
 void select_nohz_load_balancer(int stop_tick)
 {
+#ifndef CONFIG_BLD
 	int cpu = smp_processor_id();
 
 	/*
@@ -4631,6 +4634,7 @@ void select_nohz_load_balancer(int stop_tick)
 		set_bit(NOHZ_TICK_STOPPED, nohz_flags(cpu));
 	}
 	return;
+#endif
 }
 
 static int __cpuinit sched_ilb_notifier(struct notifier_block *nfb,
@@ -5271,7 +5275,9 @@ const struct sched_class fair_sched_class = {
 	.put_prev_task		= put_prev_task_fair,
 
 #ifdef CONFIG_SMP
+#ifndef CONFIG_BLD
 	.select_task_rq		= select_task_rq_fair,
+#endif
 
 	.rq_online		= rq_online_fair,
 	.rq_offline		= rq_offline_fair,
@@ -5309,6 +5315,7 @@ void print_cfs_stats(struct seq_file *m, int cpu)
 __init void init_sched_fair_class(void)
 {
 #ifdef CONFIG_SMP
+#ifndef CONFIG_BLD
 	open_softirq(SCHED_SOFTIRQ, run_rebalance_domains);
 
 #ifdef CONFIG_NO_HZ
@@ -5316,6 +5323,7 @@ __init void init_sched_fair_class(void)
 	zalloc_cpumask_var(&nohz.idle_cpus_mask, GFP_NOWAIT);
 	cpu_notifier(sched_ilb_notifier, 0);
 #endif
+#endif /* BLD */
 #endif /* SMP */
 
 }
