@@ -555,6 +555,7 @@ void resched_cpu(int cpu)
 int get_nohz_timer_target(void)
 {
 	int cpu = smp_processor_id();
+#ifndef CONFIG_BLD
 	int i;
 	struct sched_domain *sd;
 
@@ -569,6 +570,7 @@ int get_nohz_timer_target(void)
 	}
 unlock:
 	rcu_read_unlock();
+#endif
 	return cpu;
 }
 /*
@@ -2469,7 +2471,6 @@ calc_load_n(unsigned long load, unsigned long exp,
  */
 static void calc_global_nohz(void)
 {
-#ifndef CONFIG_BLD
 	long delta, active, n;
 
 	if (!time_before(jiffies, calc_load_update + 10)) {
@@ -2498,7 +2499,6 @@ static void calc_global_nohz(void)
 	 */
 	smp_wmb();
 	calc_load_idx++;
-#endif
 }
 #else /* !CONFIG_NO_HZ */
 

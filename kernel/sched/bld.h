@@ -30,7 +30,6 @@ static inline int select_cpu_for_wakeup(struct task_struct *p, int sd_flags, int
 static int bld_select_task_rq(struct task_struct *p, int sd_flags, int wake_flags)
 {
 	struct rq *tmp, *rq;
-	unsigned long flag;
 	unsigned int cpu = smp_processor_id();
 
 	if (&p->cpus_allowed) {
@@ -86,7 +85,7 @@ static void bld_track_load_deactivate(struct rq *rq)
 		if (rq->load.weight <= first->load.weight) {
 			write_lock_irqsave(&disp_list_lock, flag);
 			list_del(&rq->disp_load_balance);
-			list_add_tail(&rq->disp_load_balance, &rq_head);
+			list_add(&rq->disp_load_balance, &rq_head);
 			rq->pos = 0; first->pos = 1;
 			write_unlock_irqrestore(&disp_list_lock, flag);
 		}
