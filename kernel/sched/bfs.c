@@ -80,6 +80,7 @@
 
 #include "cpupri.h"
 #include "../workqueue_sched.h"
+#include "../smpboot.h"
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/sched.h>
@@ -2581,7 +2582,7 @@ unsigned long long task_sched_runtime(struct task_struct *p)
 	return ns;
 }
 
-/* Compatibility crap for removal */
+/* Compatibility crap */
 void account_user_time(struct task_struct *p, cputime_t cputime,
 		       cputime_t cputime_scaled)
 {
@@ -2590,6 +2591,20 @@ void account_user_time(struct task_struct *p, cputime_t cputime,
 void account_idle_time(cputime_t cputime)
 {
 }
+
+void update_cpu_load_nohz(void)
+{
+}
+
+#ifdef CONFIG_NO_HZ
+void calc_load_enter_idle(void)
+{
+}
+
+void calc_load_exit_idle(void)
+{
+}
+#endif /* CONFIG_NO_HZ */
 
 /*
  * Account guest cpu time to a process.
@@ -5635,7 +5650,7 @@ static int sched_domain_debug_one(struct sched_domain *sd, int cpu, int level,
 		}
 
 		/*
-		 * Even though we initialize ->power to something semi-sane,
+		 * Even though we initialise ->power to something semi-sane,
 		 * we leave power_orig unset. This allows us to detect if
 		 * domain iteration is still funny without causing /0 traps.
 		 */
@@ -5961,6 +5976,8 @@ static int __init isolated_cpu_setup(char *str)
 }
 
 __setup("isolcpus=", isolated_cpu_setup);
+
+#define SD_NODES_PER_DOMAIN 16
 
 static const struct cpumask *cpu_cpu_mask(int cpu)
 {
@@ -7199,6 +7216,7 @@ void __init sched_init(void)
 	/* May be allocated at isolcpus cmdline parse time */
 	if (cpu_isolated_map == NULL)
 		zalloc_cpumask_var(&cpu_isolated_map, GFP_NOWAIT);
+	idle_thread_set_boot_cpu();
 #endif /* SMP */
 }
 
