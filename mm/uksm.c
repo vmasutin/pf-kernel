@@ -4224,7 +4224,9 @@ static inline
 unsigned int scan_time_to_sleep(unsigned long long scan_time, unsigned long ratio)
 {
 	scan_time >>= 10; /* to usec level now */
-	BUG_ON(scan_time > ULONG_MAX);
+
+	if (scan_time > ULONG_MAX)
+		printk("UKSM scan_time exceeds ULONG_MAX: scan_time=%llu, ULONG_MAX=%lu\n", scan_time, ULONG_MAX);
 
 	return (unsigned int) ((unsigned long) scan_time * 
 			       (TIME_RATIO_SCALE - ratio) / USEC_PER_MSEC 
@@ -4563,6 +4565,13 @@ rm_slot:
 	/* in case of radical cpu bursts, apply the upper bound */
 	if (max_cpu_ratio) {
 		scan_time = task_sched_runtime(current) - start_time;
+
+                if ((scan_time >> 10) > (unsigned long long) ULONG_MAX) {
+			printk(KERN_ERR "scan_time=%llu start_time=%llu"
+					"current=%llu", scan_time, start_time,
+					task_sched_runtime(current));
+		}
+
 		expected_jiffies = msecs_to_jiffies(
 			scan_time_to_sleep(scan_time, max_cpu_ratio));
 
