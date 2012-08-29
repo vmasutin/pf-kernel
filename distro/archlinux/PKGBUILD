@@ -1,6 +1,6 @@
 pkgname=kernel35-pf
-basekernel=3.5.2
-pkgver=3.5.2
+basekernel=3.5.3
+pkgver=3.5.3
 pkgrel=pf
 pkgdesc="The Linux Kernel and modules"
 arch=('i686' 'x86_64')
