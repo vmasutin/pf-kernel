@@ -4563,6 +4563,13 @@ rm_slot:
 	/* in case of radical cpu bursts, apply the upper bound */
 	if (max_cpu_ratio) {
 		scan_time = task_sched_runtime(current) - start_time;
+
+                if ((scan_time >> 10) > (unsigned long long) ULONG_MAX) {
+			printk(KERN_ERR "scan_time=%llu start_time=%llu"
+					"current=%llu", scan_time, start_time,
+					task_sched_runtime(current));
+		}
+
 		expected_jiffies = msecs_to_jiffies(
 			scan_time_to_sleep(scan_time, max_cpu_ratio));
 
