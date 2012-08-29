@@ -61,7 +61,7 @@ static void free_pbe_list(struct pbe **list, int highmem)
 				toi__free_page(29, free_pbe->address);
 			else
 				toi_free_page(29,
-					(unsigned long) free_pbe->address);
+						(unsigned long) free_pbe->address);
 			free_pbe = free_pbe->next;
 		}
 
@@ -208,9 +208,9 @@ int __toi_post_context_save(void)
 
 	if (extra_pd1_pages_used > extra_pd1_pages_allowance) {
 		printk(KERN_INFO "Pageset1 has grown by %lu pages. "
-			"extra_pages_allowance is currently only %lu.\n",
-			pagedir1.size - old_ps1_size,
-			extra_pd1_pages_allowance);
+				"extra_pages_allowance is currently only %lu.\n",
+				pagedir1.size - old_ps1_size,
+				extra_pd1_pages_allowance);
 
 		/*
 		 * Highlevel code will see this, clear the state and
@@ -227,8 +227,8 @@ int __toi_post_context_save(void)
 			return 1;
 		}
 		printk(KERN_INFO "However it looks like there's enough"
-			" free ram and storage to handle this, so "
-			" continuing anyway.");
+				" free ram and storage to handle this, so "
+				" continuing anyway.");
 		/* 
 		 * What if try_allocate_extra_memory above calls
 		 * toi_allocate_extra_pagedir_memory and it allocs a new
@@ -238,7 +238,7 @@ int __toi_post_context_save(void)
 	}
 
 	if (!test_action_state(TOI_TEST_FILTER_SPEED) &&
-	    !test_action_state(TOI_TEST_BIO))
+			!test_action_state(TOI_TEST_BIO))
 		toi_copy_pageset1();
 
 	return 0;
@@ -275,8 +275,8 @@ int toi_hibernate(void)
 		 */
 
 		memcpy(&toi_bkd, (char *) boot_kernel_data_buffer,
-			min_t(int, sizeof(struct toi_boot_kernel_data),
-				bkd->size));
+				min_t(int, sizeof(struct toi_boot_kernel_data),
+					bkd->size));
 	}
 
 	toi_running = 0;
@@ -300,7 +300,7 @@ int toi_atomic_restore(void)
 	toi_prepare_status(DONT_CLEAR_BAR,	"Atomic restore.");
 
 	memcpy(&toi_bkd.toi_nosave_commandline, saved_command_line,
-		strlen(saved_command_line));
+			strlen(saved_command_line));
 
 	toi_pre_atomic_restore_modules(&toi_bkd);
 
@@ -341,38 +341,38 @@ Failed:
  **/
 int toi_go_atomic(pm_message_t state, int suspend_time)
 {
-  if (suspend_time) {
-    if (platform_begin(1)) {
-      set_abort_result(TOI_PLATFORM_PREP_FAILED);
-      toi_end_atomic(ATOMIC_STEP_PLATFORM_END, suspend_time, 3);
-      return 1;
-    }
+	if (suspend_time) {
+		if (platform_begin(1)) {
+			set_abort_result(TOI_PLATFORM_PREP_FAILED);
+			toi_end_atomic(ATOMIC_STEP_PLATFORM_END, suspend_time, 3);
+			return 1;
+		}
 
-    if (dpm_prepare(PMSG_FREEZE)) {
-      set_abort_result(TOI_DPM_PREPARE_FAILED);
-      dpm_complete(PMSG_RECOVER);
-      toi_end_atomic(ATOMIC_STEP_PLATFORM_END, suspend_time, 3);
-      return 1;
-    }
-  }
+		if (dpm_prepare(PMSG_FREEZE)) {
+			set_abort_result(TOI_DPM_PREPARE_FAILED);
+			dpm_complete(PMSG_RECOVER);
+			toi_end_atomic(ATOMIC_STEP_PLATFORM_END, suspend_time, 3);
+			return 1;
+		}
+	}
 
 	suspend_console();
 	ftrace_stop();
 	pm_restrict_gfp_mask();
 
-  if (suspend_time) {
-    if (dpm_suspend(state)) {
-      set_abort_result(TOI_DPM_SUSPEND_FAILED);
-      toi_end_atomic(ATOMIC_STEP_DEVICE_RESUME, suspend_time, 3);
-      return 1;
-    }
-  } else {
-    if (dpm_suspend_start(state)) {
-      set_abort_result(TOI_DPM_SUSPEND_FAILED);
-      toi_end_atomic(ATOMIC_STEP_DEVICE_RESUME, suspend_time, 3);
-      return 1;
-    }
-  }
+	if (suspend_time) {
+		if (dpm_suspend(state)) {
+			set_abort_result(TOI_DPM_SUSPEND_FAILED);
+			toi_end_atomic(ATOMIC_STEP_DEVICE_RESUME, suspend_time, 3);
+			return 1;
+		}
+	} else {
+		if (dpm_suspend_start(state)) {
+			set_abort_result(TOI_DPM_SUSPEND_FAILED);
+			toi_end_atomic(ATOMIC_STEP_DEVICE_RESUME, suspend_time, 3);
+			return 1;
+		}
+	}
 
 	/* At this point, dpm_suspend_start() has been called, but *not*
 	 * dpm_suspend_noirq(). We *must* dpm_suspend_noirq() now.
@@ -437,37 +437,37 @@ void toi_end_atomic(int stage, int suspend_time, int error)
 		PMSG_RESTORE;
 
 	switch (stage) {
-	case ATOMIC_ALL_STEPS:
-		if (!suspend_time) {
-			events_check_enabled = false;
-			platform_leave(1);
-		}
-	case ATOMIC_STEP_SYSCORE_RESUME:
-		syscore_resume();
-	case ATOMIC_STEP_IRQS:
-		local_irq_enable();
-	case ATOMIC_STEP_CPU_HOTPLUG:
-		if (test_action_state(TOI_LATE_CPU_HOTPLUG))
-			enable_nonboot_cpus();
-	case ATOMIC_STEP_PLATFORM_FINISH:
-		if (!suspend_time && error & 2)
-			platform_restore_cleanup(1);
-    else 
-      platform_finish(1);
-		dpm_resume_start(msg);
-	case ATOMIC_STEP_DEVICE_RESUME:
-		if (suspend_time && (error & 2))
-			platform_recover(1);
-		dpm_resume(msg);
-		if (error || !toi_in_suspend())
-			pm_restore_gfp_mask();
-		ftrace_start();
-		resume_console();
-	case ATOMIC_STEP_DPM_COMPLETE:
-		dpm_complete(msg);
-	case ATOMIC_STEP_PLATFORM_END:
-		platform_end(1);
+		case ATOMIC_ALL_STEPS:
+			if (!suspend_time) {
+				events_check_enabled = false;
+				platform_leave(1);
+			}
+		case ATOMIC_STEP_SYSCORE_RESUME:
+			syscore_resume();
+		case ATOMIC_STEP_IRQS:
+			local_irq_enable();
+		case ATOMIC_STEP_CPU_HOTPLUG:
+			if (test_action_state(TOI_LATE_CPU_HOTPLUG))
+				enable_nonboot_cpus();
+		case ATOMIC_STEP_PLATFORM_FINISH:
+			if (!suspend_time && error & 2)
+				platform_restore_cleanup(1);
+			else 
+				platform_finish(1);
+			dpm_resume_start(msg);
+		case ATOMIC_STEP_DEVICE_RESUME:
+			if (suspend_time && (error & 2))
+				platform_recover(1);
+			dpm_resume(msg);
+			if (error || !toi_in_suspend())
+				pm_restore_gfp_mask();
+			ftrace_start();
+			resume_console();
+		case ATOMIC_STEP_DPM_COMPLETE:
+			dpm_complete(msg);
+		case ATOMIC_STEP_PLATFORM_END:
+			platform_end(1);
 
-		toi_prepare_status(DONT_CLEAR_BAR, "Post atomic.");
+			toi_prepare_status(DONT_CLEAR_BAR, "Post atomic.");
 	}
 }
