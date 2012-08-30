@@ -32,7 +32,7 @@ build() {
   # There's no separation of firmware depending on kernel version - 
   # comment this line if you intend on using the built kernel exclusively,
   # otherwise there'll be file conflicts with the existing kernel
-  rm -rf $startdir/pkg/lib/firmware
+  rm -rf $startdir/pkg/usr/lib/firmware
 
   install -Dm644 "System.map" "$startdir/pkg/boot/System.map35$LOCAL_VERSION"
   install -Dm644 "arch/x86/boot/bzImage" "$startdir/pkg/boot/vmlinuz35$LOCAL_VERSION"
