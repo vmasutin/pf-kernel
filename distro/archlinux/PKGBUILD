@@ -36,6 +36,7 @@ build() {
 
   install -Dm644 "System.map" "$startdir/pkg/boot/System.map35$LOCAL_VERSION"
   install -Dm644 "arch/x86/boot/bzImage" "$startdir/pkg/boot/vmlinuz35$LOCAL_VERSION"
+  install -Dm644 "distro/archlinux/linux-pf.preset" "$startdir/pkg/etc/mkinitcpio.d/linux-pf.preset"
 
   # Change the version strings in kernel35.install
   sed -i \
