@@ -29,7 +29,7 @@ build() {
   make INSTALL_MOD_PATH=$startdir/pkg/usr modules_install || return 1
 
   # Running depmod for installed modules
-  depmod -b "$pkgdir" -F System.map "$pkgver-$pkgrel"
+  depmod -b "$pkgdir/usr" -F System.map "$pkgver-$pkgrel"
 
   # There's no separation of firmware depending on kernel version - 
   # comment this line if you intend on using the built kernel exclusively,
