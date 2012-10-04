@@ -2305,8 +2305,6 @@ pgoff_t __page_file_index(struct page *page)
 }
 EXPORT_SYMBOL_GPL(__page_file_index);
 
-EXPORT_SYMBOL_GPL(__page_file_index);
-
 struct swap_info_struct *get_swap_info_struct(unsigned type)
 {
 	return swap_info[type];
