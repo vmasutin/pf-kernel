@@ -1243,19 +1243,16 @@ struct task_struct {
 	unsigned int flags;	/* per process flags, defined below */
 	unsigned int ptrace;
 
-#ifdef CONFIG_SCHED_BFS
 #ifdef CONFIG_SMP
 	struct llist_node wake_entry;
+#endif
+#if defined(CONFIG_SMP) || defined(CONFIG_SCHED_BFS)
 	bool on_cpu;
 #endif
+#ifndef CONFIG_SCHED_BFS
 	bool on_rq;
-#else /* CONFIG_SCHED_BFS */
-#ifdef CONFIG_SMP
-	struct llist_node wake_entry;
-	int on_cpu;
 #endif
-	int on_rq;
-#endif
+
 	int prio, static_prio, normal_prio;
 	unsigned int rt_priority;
 #ifdef CONFIG_SCHED_BFS
