@@ -161,9 +161,10 @@ extern struct task_group root_task_group;
 	.cpus_allowed	= CPU_MASK_ALL,					\
 	.mm		= NULL,						\
 	.active_mm	= &init_mm,					\
+	.run_list	= LIST_HEAD_INIT(tsk.run_list),			\
+	.time_slice	= HZ,					\
 	.tasks		= LIST_HEAD_INIT(tsk.tasks),			\
 	INIT_PUSHABLE_TASKS(tsk)					\
-	INIT_CGROUP_SCHED(tsk)						\
 	.ptraced	= LIST_HEAD_INIT(tsk.ptraced),			\
 	.ptrace_entry	= LIST_HEAD_INIT(tsk.ptrace_entry),		\
 	.real_parent	= &tsk,						\
@@ -187,14 +188,13 @@ extern struct task_group root_task_group;
 	.alloc_lock	= __SPIN_LOCK_UNLOCKED(tsk.alloc_lock),		\
 	.journal_info	= NULL,						\
 	.cpu_timers	= INIT_CPU_TIMERS(tsk.cpu_timers),		\
-	.pi_lock	= __RAW_SPIN_LOCK_UNLOCKED(tsk.pi_lock),	\
+	.pi_lock	= __RAW_SPIN_LOCK_UNLOCKED(tsk.pi_lock),		\
 	.timer_slack_ns = 50000, /* 50 usec default slack */		\
 	.pids = {							\
 		[PIDTYPE_PID]  = INIT_PID_LINK(PIDTYPE_PID),		\
 		[PIDTYPE_PGID] = INIT_PID_LINK(PIDTYPE_PGID),		\
 		[PIDTYPE_SID]  = INIT_PID_LINK(PIDTYPE_SID),		\
 	},								\
-	.thread_group	= LIST_HEAD_INIT(tsk.thread_group),		\
 	INIT_IDS							\
 	INIT_PERF_EVENTS(tsk)						\
 	INIT_TRACE_IRQFLAGS						\
@@ -202,7 +202,6 @@ extern struct task_group root_task_group;
 	INIT_FTRACE_GRAPH						\
 	INIT_TRACE_RECURSION						\
 	INIT_TASK_RCU_PREEMPT(tsk)					\
-	INIT_CPUSET_SEQ							\
 }
 #else /* CONFIG_SCHED_BFS */
 #define INIT_TASK_COMM "swapper"
