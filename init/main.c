@@ -805,10 +805,10 @@ static noinline int init_post(void)
 	system_state = SYSTEM_RUNNING;
 	numa_default_policy();
 
-	print_scheduler_version();
-
 	current->signal->flags |= SIGNAL_UNKILLABLE;
 	flush_delayed_fput();
+
+	print_scheduler_version();
 
 	if (ramdisk_execute_command) {
 		run_init_process(ramdisk_execute_command);
