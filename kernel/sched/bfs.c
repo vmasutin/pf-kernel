@@ -4654,10 +4654,6 @@ static inline bool should_resched(void)
 
 static void __cond_resched(void)
 {
-	/* NOT a real fix but will make voluntary preempt work. 馬鹿な事 */
-	if (unlikely(system_state != SYSTEM_RUNNING))
-		return;
-
 	add_preempt_count(PREEMPT_ACTIVE);
 	schedule();
 	sub_preempt_count(PREEMPT_ACTIVE);
