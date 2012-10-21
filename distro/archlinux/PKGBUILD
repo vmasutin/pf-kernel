@@ -1,6 +1,6 @@
 pkgname=kernel36-pf
-basekernel=3.6.3
-pkgver=3.6.3
+basekernel=3.6.4
+pkgver=3.6.4
 pkgrel=pf
 pkgdesc="The Linux Kernel and modules"
 arch=('i686' 'x86_64')
