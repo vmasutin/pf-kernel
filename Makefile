@@ -1,7 +1,12 @@
 VERSION = 3
 PATCHLEVEL = 4
+<<<<<<< HEAD
 SUBLEVEL = 6
 EXTRAVERSION = -pf
+=======
+SUBLEVEL = 16
+EXTRAVERSION =
+>>>>>>> linux-stable/linux-3.4.y
 NAME = Saber-toothed Squirrel
 
 # *DOCUMENTATION*
