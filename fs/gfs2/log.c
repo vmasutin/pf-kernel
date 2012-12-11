@@ -796,6 +796,8 @@ int gfs2_logd(void *data)
 	unsigned long t = 1;
 	DEFINE_WAIT(wait);
 
+	set_freezable();
+
 	while (!kthread_should_stop()) {
 
 		if (gfs2_jrnl_flush_reqd(sdp) || t == 0) {
