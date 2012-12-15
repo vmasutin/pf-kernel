@@ -1,0 +1,49 @@
+pkgname=kernel37-pf
+basekernel=3.7.1
+pkgver=3.7.1
+pkgrel=pf
+pkgdesc="The Linux Kernel and modules"
+arch=('i686' 'x86_64')
+license=('GPL')
+url="http://pf.natalenko.name"
+depends=('kmod' 'mkinitcpio')
+provides=(kernel37)
+install=kernel37.install
+
+build() {
+  LOCAL_VERSION=-$pkgrel
+
+  # Go to kernel's tree root
+  cd ..
+
+  # Remove depmod from kernel script, steal this trick from Arch
+  sed -i '2iexit 0' scripts/depmod.sh
+
+  # Detect CPUs count automatically
+  CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
+  echo "Compiling using $CPUS_COUNT thread(s)"
+  make -j$CPUS_COUNT || return 1
+
+  # Note that modules are in /usr/lib/modules now
+  mkdir -p $startdir/pkg/{usr/lib/modules,boot}
+  make INSTALL_MOD_PATH=$startdir/pkg/usr modules_install || return 1
+
+  # Running depmod for installed modules
+  depmod -b "$pkgdir/usr" -F System.map "$pkgver-$pkgrel"
+
+  # There's no separation of firmware depending on kernel version - 
+  # comment this line if you intend on using the built kernel exclusively,
+  # otherwise there'll be file conflicts with the existing kernel
+  rm -rf $startdir/pkg/usr/lib/firmware
+
+  install -Dm644 "System.map" "$startdir/pkg/boot/System.map37$LOCAL_VERSION"
+  install -Dm644 "arch/x86/boot/bzImage" "$startdir/pkg/boot/vmlinuz37$LOCAL_VERSION"
+  install -Dm644 "distro/archlinux/linux-pf37.preset" "$startdir/pkg/etc/mkinitcpio.d/linux-pf37.preset"
+
+  # Change the version strings in kernel37.install
+  sed -i \
+	-e "s/KERNEL_VERSION=.*/KERNEL_VERSION=\"$basekernel\"/" \
+	-e "s/LOCAL_VERSION=.*/LOCAL_VERSION=\"$LOCAL_VERSION\"/" \
+	$startdir/kernel37.install
+}
+
