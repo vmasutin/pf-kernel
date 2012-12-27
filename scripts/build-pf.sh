@@ -42,7 +42,7 @@ case "$1" in
 
 		CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
 		echo "Compiling using $CPUS_COUNT thread(s)"
-		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --cross-compile - --arch i386 kernel_image kernel_headers
+		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" DEB_HOST_ARCH=i386 setarch i386 make-kpkg --rootcmd fakeroot --initrd --cross-compile - --arch i386 kernel_image kernel_headers
 		;;
 	*)
 		echo Unsupported distro given. Please, try enother.
