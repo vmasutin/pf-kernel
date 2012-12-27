@@ -36,6 +36,14 @@ case "$1" in
 		echo "Compiling using $CPUS_COUNT thread(s)"
 		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd kernel_image kernel_headers
 		;;
+	debian-i686)
+		echo Preparing necessary files...
+		cp distro/debian/debian-i686.config .config
+
+		CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
+		echo "Compiling using $CPUS_COUNT thread(s)"
+		ARCH=i386 CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd kernel_image kernel_headers
+		;;
 	*)
 		echo Unsupported distro given. Please, try enother.
 		;;
