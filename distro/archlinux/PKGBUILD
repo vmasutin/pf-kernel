@@ -18,7 +18,7 @@ build() {
   # Detect CPUs count automatically
   CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
   echo "Compiling using $CPUS_COUNT thread(s)"
-  make -j$CPUS_COUNT bzImage modules || return 1
+  LOCALVERSION="" make -j$CPUS_COUNT bzImage modules || return 1
 }
 
 package_kernel37-pf() {
