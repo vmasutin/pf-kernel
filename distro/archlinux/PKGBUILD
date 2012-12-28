@@ -1,4 +1,4 @@
-pkgname=('kernel37-pf' 'kernel37-pf-headers')
+pkgname=('linux37-pf' 'linux37-pf-headers')
 pkgver=3.7.1
 pkgrel=pf
 pkgdesc="pf-kernel with modules"
@@ -6,7 +6,7 @@ arch=('i686' 'x86_64')
 makedepends=('xz' 'rsync')
 options=('!strip')
 license=('GPL')
-url="http://pf.natalenko.name"
+url="http://pf.natalenko.name/"
 
 build() {
   # Go to kernel's tree root
@@ -21,10 +21,10 @@ build() {
   LOCALVERSION="" make -j$CPUS_COUNT bzImage modules || return 1
 }
 
-package_kernel37-pf() {
+package_linux37-pf() {
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio')
-  provides=('kernel37')
-  install='kernel37.install'
+  provides=('linux37-pf')
+  install='linux37-pf.install'
 
   cd $startdir
 
@@ -42,19 +42,19 @@ package_kernel37-pf() {
 
   rm -f $pkgdir/usr/lib/modules/$pkgver-$pkgrel/{source,build}
 
-  install -Dm644 "System.map" "$pkgdir/boot/System.map37-$pkgrel"
-  install -Dm644 "arch/x86/boot/bzImage" "$pkgdir/boot/vmlinuz37-$pkgrel"
-  install -Dm644 "distro/archlinux/linux-pf37.preset" "$pkgdir/etc/mkinitcpio.d/linux-pf37.preset"
+  install -Dm644 "System.map" "$pkgdir/boot/System.map-linux37-$pkgrel"
+  install -Dm644 "arch/x86/boot/bzImage" "$pkgdir/boot/vmlinuz-linux37-$pkgrel"
+  install -Dm644 "distro/archlinux/linux37-pf.preset" "$pkgdir/etc/mkinitcpio.d/linux37-pf.preset"
 
-  # Change the version strings in kernel37.install
+  # Change the version strings in linux37-pf.install
   sed -i \
 	-e "s/KERNEL_VERSION=.*/KERNEL_VERSION=\"$pkgver\"/" \
 	-e "s/LOCAL_VERSION=.*/LOCAL_VERSION=\"-$pkgrel\"/" \
-	$startdir/kernel37.install
+	$startdir/linux37-pf.install
 }
 
-package_kernel37-pf-headers() {
-  provides=('kernel37-headers')
+package_linux37-pf-headers() {
+  provides=('linux37-pf-headers')
 
   cd $startdir
 

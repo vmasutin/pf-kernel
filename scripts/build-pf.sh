@@ -14,7 +14,7 @@ case "$1" in
 	arch)
 		echo Preparing necessary files...
 		cp distro/archlinux/PKGBUILD .
-		cp distro/archlinux/kernel"$BASE""$BRANCH".install .
+		cp distro/archlinux/linux"$BASE""$BRANCH"-pf.install .
 		cp distro/archlinux/arch.config .config
 
 		echo Building pf-kernel...
