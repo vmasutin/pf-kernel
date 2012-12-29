@@ -20,6 +20,15 @@ case "$1" in
 		echo Building pf-kernel...
 		makepkg -s
 		;;
+	arch-i686)
+		echo Preparing necessary files...
+		cp distro/archlinux/PKGBUILD .
+		cp distro/archlinux/linux"$BASE""$BRANCH"-pf.install .
+		cp distro/archlinux/arch-i686.config .config
+
+		echo Building pf-kernel...
+		linux32 makepkg --config /usr/share/devtools/makepkg-i686.conf -s
+		;;
 	ubuntu)
 		echo Preparing necessary files...
 		cp distro/ubuntu/ubuntu.config .config
