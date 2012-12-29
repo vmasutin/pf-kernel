@@ -27,7 +27,7 @@ case "$1" in
 		cp distro/archlinux/arch-i686.config .config
 
 		echo Building pf-kernel...
-		linux32 makepkg --config /usr/share/devtools/makepkg-i686.conf -s
+		linux32 makepkg -s
 		;;
 	ubuntu)
 		echo Preparing necessary files...
