@@ -27,7 +27,7 @@ case "$1" in
 		cp distro/archlinux/arch-i686.config .config
 
 		echo Building pf-kernel...
-		linux32 makepkg --config /usr/share/devtools/makepkg-i686.conf -s
+		linux32 makepkg -s
 		;;
 	ubuntu)
 		echo Preparing necessary files...
@@ -43,7 +43,7 @@ case "$1" in
 
 		CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
 		echo "Compiling using $CPUS_COUNT thread(s)"
-		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" DEB_HOST_ARCH=i386 setarch i386 make-kpkg --rootcmd fakeroot --initrd --cross-compile - --arch i386 --revision 1 kernel_image kernel_headers
+		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers
 		;;
 	debian)
 		echo Preparing necessary files...
@@ -59,7 +59,7 @@ case "$1" in
 
 		CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
 		echo "Compiling using $CPUS_COUNT thread(s)"
-		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" DEB_HOST_ARCH=i386 setarch i386 make-kpkg --rootcmd fakeroot --initrd --cross-compile - --arch i386 --revision 1 kernel_image kernel_headers
+		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers
 		;;
 	*)
 		echo Unsupported distro given. Please, try enother.
