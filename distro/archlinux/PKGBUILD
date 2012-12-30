@@ -68,6 +68,8 @@ package_linux37-pf-headers() {
   make INSTALL_HDR_PATH=$pkgdir/usr/src/linux-$pkgver-$pkgrel headers_install
   install -Dm644 .config $pkgdir/usr/src/linux-$pkgver-$pkgrel
   install -Dm644 Module.symvers $pkgdir/usr/src/linux-$pkgver-$pkgrel
-  rsync -a --include='*/' --include='Kbuild*' --include='Kconfig*' --include='*Makefile*' --include='auto.conf' --include='autoconf.h' --include='kconfig.h' --exclude='*' --prune-empty-dirs . $pkgdir/usr/src/linux-$pkgver-$pkgrel
+  rsync -a --include='*/' --include='Kbuild*' --include='Kconfig*' --include='*Makefile*' --include='auto.conf' --include='autoconf.h' --include='kconfig.h' --include='asm-offsets.s' --exclude='*' --prune-empty-dirs . $pkgdir/usr/src/linux-$pkgver-$pkgrel
   rsync -a scripts $pkgdir/usr/src/linux-$pkgver-$pkgrel
+  rsync -a include $pkgdir/usr/src/linux-$pkgver-$pkgrel
+  rsync -a arch/x86/include $pkgdir/usr/src/linux-$pkgver-$pkgrel/arch/x86
 }
