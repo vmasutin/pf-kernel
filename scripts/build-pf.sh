@@ -2,13 +2,7 @@
 #!/usr/bin/env bash
 BASE="3"
 BRANCH="7"
-RELEASE="1"
-
-echo Updating pf-kernel source tree...
-git fetch origin
-#git checkout v"$BASE"."$BRANCH"."$RELEASE"-pf
-git checkout pf-"$BASE"."$BRANCH"
-git merge origin/pf-"$BASE"."$BRANCH"
+RELEASE="2"
 
 case "$1" in
 	arch)
