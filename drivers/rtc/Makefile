@@ -12,7 +12,6 @@ rtc-core-y			:= class.o interface.o
 rtc-core-$(CONFIG_RTC_INTF_DEV)	+= rtc-dev.o
 rtc-core-$(CONFIG_RTC_INTF_PROC) += rtc-proc.o
 rtc-core-$(CONFIG_RTC_INTF_SYSFS) += rtc-sysfs.o
-rtc-core-$(CONFIG_DMI) += dmi.o
 
 # Keep the list ordered.
 
