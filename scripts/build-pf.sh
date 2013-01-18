@@ -2,7 +2,6 @@
 #!/usr/bin/env bash
 BASE="3"
 BRANCH="7"
-RELEASE="2"
 
 case "$1" in
 	arch)
