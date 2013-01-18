@@ -1,5 +1,5 @@
 pkgname=('linux37-pf' 'linux37-pf-headers')
-pkgver=3.7.2
+pkgver=3.7.3
 pkgrel=pf
 pkgdesc="pf-kernel with modules"
 arch=('i686' 'x86_64')
