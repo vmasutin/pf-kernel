@@ -1,5 +1,5 @@
-pkgname=('linux37-pf' 'linux37-pf-headers')
-pkgver=3.7.6
+pkgname=('linux38-pf' 'linux38-pf-headers')
+pkgver=3.8.1
 pkgrel=pf
 pkgdesc="pf-kernel with modules"
 arch=('i686' 'x86_64')
@@ -21,10 +21,10 @@ build() {
   LOCALVERSION="" make -j$CPUS_COUNT bzImage modules || return 1
 }
 
-package_linux37-pf() {
+package_linux38-pf() {
   depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio')
-  provides=('linux37-pf')
-  install='linux37-pf.install'
+  provides=('linux38-pf')
+  install='linux38-pf.install'
 
   cd $startdir
 
@@ -42,19 +42,19 @@ package_linux37-pf() {
 
   rm -f $pkgdir/usr/lib/modules/$pkgver-$pkgrel/{source,build}
 
-  install -Dm644 "System.map" "$pkgdir/boot/System.map-linux37-$pkgrel"
-  install -Dm644 "arch/x86/boot/bzImage" "$pkgdir/boot/vmlinuz-linux37-$pkgrel"
-  install -Dm644 "distro/archlinux/linux37-pf.preset" "$pkgdir/etc/mkinitcpio.d/linux37-pf.preset"
+  install -Dm644 "System.map" "$pkgdir/boot/System.map-linux38-$pkgrel"
+  install -Dm644 "arch/x86/boot/bzImage" "$pkgdir/boot/vmlinuz-linux38-$pkgrel"
+  install -Dm644 "distro/archlinux/linux38-pf.preset" "$pkgdir/etc/mkinitcpio.d/linux38-pf.preset"
 
-  # Change the version strings in linux37-pf.install
+  # Change the version strings in linux38-pf.install
   sed -i \
 	-e "s/KERNEL_VERSION=.*/KERNEL_VERSION=\"$pkgver\"/" \
 	-e "s/LOCAL_VERSION=.*/LOCAL_VERSION=\"-$pkgrel\"/" \
-	$startdir/linux37-pf.install
+	$startdir/linux38-pf.install
 }
 
-package_linux37-pf-headers() {
-  provides=('linux37-pf-headers')
+package_linux38-pf-headers() {
+  provides=('linux38-pf-headers')
 
   cd $startdir
 
