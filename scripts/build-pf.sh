@@ -1,7 +1,7 @@
 # vim: ft=sh
 #!/usr/bin/env bash
 BASE="3"
-BRANCH="7"
+BRANCH="8"
 
 case "$1" in
 	arch)
