@@ -1,0 +1,75 @@
+pkgname=('linux38-pf' 'linux38-pf-headers')
+pkgver=3.8.1
+pkgrel=pf
+pkgdesc="pf-kernel with modules"
+arch=('i686' 'x86_64')
+makedepends=('xz' 'rsync')
+options=('!strip')
+license=('GPL')
+url="http://pf.natalenko.name/"
+
+build() {
+  # Go to kernel's tree root
+  cd $startdir
+
+  # Remove depmod from kernel script, steal this trick from Arch
+  sed -i '2iexit 0' scripts/depmod.sh
+
+  # Detect CPUs count automatically
+  CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
+  echo "Compiling using $CPUS_COUNT thread(s)"
+  LOCALVERSION="" make -j$CPUS_COUNT bzImage modules || return 1
+}
+
+package_linux38-pf() {
+  depends=('coreutils' 'linux-firmware' 'kmod' 'mkinitcpio')
+  provides=('linux38-pf')
+  install='linux38-pf.install'
+
+  cd $startdir
+
+  # Note that modules are in /usr/lib/modules now
+  mkdir -p $pkgdir/{usr/lib/modules,boot}
+  make INSTALL_MOD_PATH=$pkgdir/usr modules_install || return 1
+
+  # Running depmod for installed modules
+  depmod -b "$pkgdir/usr" -F System.map "$pkgver-$pkgrel"
+
+  # There's no separation of firmware depending on kernel version -
+  # comment this line if you intend on using the built kernel exclusively,
+  # otherwise there'll be file conflicts with the existing kernel
+  rm -rf $pkgdir/usr/lib/firmware
+
+  rm -f $pkgdir/usr/lib/modules/$pkgver-$pkgrel/{source,build}
+
+  install -Dm644 "System.map" "$pkgdir/boot/System.map-linux38-$pkgrel"
+  install -Dm644 "arch/x86/boot/bzImage" "$pkgdir/boot/vmlinuz-linux38-$pkgrel"
+  install -Dm644 "distro/archlinux/linux38-pf.preset" "$pkgdir/etc/mkinitcpio.d/linux38-pf.preset"
+
+  # Change the version strings in linux38-pf.install
+  sed -i \
+	-e "s/KERNEL_VERSION=.*/KERNEL_VERSION=\"$pkgver\"/" \
+	-e "s/LOCAL_VERSION=.*/LOCAL_VERSION=\"-$pkgrel\"/" \
+	$startdir/linux38-pf.install
+}
+
+package_linux38-pf-headers() {
+  provides=('linux38-pf-headers')
+
+  cd $startdir
+
+  mkdir -p $pkgdir/usr/lib/modules/$pkgver-$pkgrel/
+  cd $pkgdir/usr/lib/modules/$pkgver-$pkgrel/
+  ln -s ../../../src/linux-$pkgver-$pkgrel build
+
+  cd $startdir
+
+  mkdir -p $pkgdir/usr/src/linux-$pkgver-$pkgrel
+  make INSTALL_HDR_PATH=$pkgdir/usr/src/linux-$pkgver-$pkgrel headers_install
+  install -Dm644 .config $pkgdir/usr/src/linux-$pkgver-$pkgrel
+  install -Dm644 Module.symvers $pkgdir/usr/src/linux-$pkgver-$pkgrel
+  rsync -a --include='*/' --include='Kbuild*' --include='Kconfig*' --include='*Makefile*' --include='auto.conf' --include='autoconf.h' --include='kconfig.h' --include='asm-offsets.s' --exclude='*' --prune-empty-dirs . $pkgdir/usr/src/linux-$pkgver-$pkgrel
+  rsync -a scripts $pkgdir/usr/src/linux-$pkgver-$pkgrel
+  rsync -a include $pkgdir/usr/src/linux-$pkgver-$pkgrel
+  rsync -a arch/x86/include $pkgdir/usr/src/linux-$pkgver-$pkgrel/arch/x86
+}
