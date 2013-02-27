@@ -31,11 +31,6 @@
 #include "eio_ttc.h"
 
 static DEFINE_SPINLOCK(_job_lock);
-
-extern mempool_t *_job_pool;
-
-extern atomic_t nr_cache_jobs;
-
 static LIST_HEAD(_io_jobs);
 static LIST_HEAD(_disk_read_jobs);
 
@@ -151,7 +146,7 @@ struct kcached_job *eio_new_job(struct cache_c *dmc, struct eio_bio *bio,
 {
 	struct kcached_job *job;
 
-	VERIFY((bio != NULL) || (index != -1));
+	EIO_ASSERT((bio != NULL) || (index != -1));
 
 	job = eio_alloc_cache_job();
 	if (unlikely(job == NULL)) {
@@ -173,7 +168,7 @@ struct kcached_job *eio_new_job(struct cache_c *dmc, struct eio_bio *bio,
 				(index << dmc->block_shift) + dmc->md_sectors +
 				(bio->eb_sector -
 				 EIO_ROUND_SECTOR(dmc, bio->eb_sector));
-			VERIFY(to_sector(bio->eb_size) <= dmc->block_size);
+			EIO_ASSERT(to_sector(bio->eb_size) <= dmc->block_size);
 			job->job_io_regions.cache.count =
 				to_sector(bio->eb_size);
 		} else {
@@ -303,7 +298,7 @@ void eio_plug_disk_device(struct cache_c *dmc)
  * by the kernel proper. We will get an IO error if an IO is done on a
  * device that does not exist.
  */
-void eio_suspend_caching(struct cache_c *dmc, dev_notifier_t note)
+void eio_suspend_caching(struct cache_c *dmc, enum dev_notifier note)
 {
 
 	spin_lock_irqsave(&dmc->cache_spin_lock, dmc->cache_spin_lock_flags);
@@ -334,7 +329,7 @@ void eio_suspend_caching(struct cache_c *dmc, dev_notifier_t note)
 			 * - ssd removal should result in FAILED state
 			 * - the cached block should not be reset.
 			 */
-			VERIFY(!CACHE_DEGRADED_IS_SET(dmc));
+			EIO_ASSERT(!CACHE_DEGRADED_IS_SET(dmc));
 			dmc->cache_flags |= CACHE_FLAGS_FAILED;
 			pr_info
 				("suspend caching: SSD Device Removed."
