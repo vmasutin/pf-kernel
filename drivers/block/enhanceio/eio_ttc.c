@@ -35,17 +35,13 @@ static struct rw_semaphore eio_ttc_lock[EIO_HASHTBL_SIZE];
 static struct list_head eio_ttc_list[EIO_HASHTBL_SIZE];
 
 int eio_reboot_notified;
-extern int eio_force_warm_boot;
 
 extern long eio_ioctl(struct file *filp, unsigned cmd, unsigned long arg);
 extern long eio_compact_ioctl(struct file *filp, unsigned cmd,
 			      unsigned long arg);
 
-extern mempool_t *_io_pool;
-extern struct eio_control_s *eio_control;
-
 static void eio_make_request_fn(struct request_queue *, struct bio *);
-static void eio_cache_rec_fill(struct cache_c *, cache_rec_short_t *);
+static void eio_cache_rec_fill(struct cache_c *, struct cache_rec_short *);
 static void eio_bio_end_empty_barrier(struct bio *, int);
 static void eio_issue_empty_barrier_flush(struct block_device *, struct bio *,
 					  int, make_request_fn *, int rw_flags);
@@ -216,7 +212,7 @@ int eio_ttc_activate(struct cache_c *dmc)
 		}
 
 		/* some partition of same device already cached */
-		VERIFY(dmc1->dev_info == EIO_DEV_PARTITION);
+		EIO_ASSERT(dmc1->dev_info == EIO_DEV_PARTITION);
 		origmfn = dmc1->origmfn;
 		break;
 	}
@@ -228,7 +224,7 @@ int eio_ttc_activate(struct cache_c *dmc)
 	if (origmfn) {
 		dmc->origmfn = origmfn;
 		dmc->dev_info = EIO_DEV_PARTITION;
-		VERIFY(wholedisk == 0);
+		EIO_ASSERT(wholedisk == 0);
 	} else {
 		dmc->origmfn = rq->make_request_fn;
 		rq->make_request_fn = eio_make_request_fn;
@@ -312,7 +308,7 @@ deactivate:
 			if (dmc1->disk_dev->bdev->bd_contains != bdev->bd_contains)
 				continue;
 
-			VERIFY(dmc1->dev_info == EIO_DEV_PARTITION);
+			EIO_ASSERT(dmc1->dev_info == EIO_DEV_PARTITION);
 
 			/*
 			 * There are still other partitions which are cached.
@@ -405,7 +401,7 @@ re_lookup:
 		if ((bio->bi_sector >= dmc1->dev_start_sect) &&
 		    ((bio->bi_sector + to_sector(bio->bi_size) - 1) <=
 		     dmc1->dev_end_sect)) {
-			VERIFY(overlap == 0);
+			EIO_ASSERT(overlap == 0);
 			dmc = dmc1;     /* found cached partition */
 			break;
 		}
@@ -444,7 +440,7 @@ re_lookup:
 		 */
 
 		if (bio->bi_sector) {
-			VERIFY(bio->bi_sector >= dmc->dev_start_sect);
+			EIO_ASSERT(bio->bi_sector >= dmc->dev_start_sect);
 			bio->bi_sector -= dmc->dev_start_sect;
 		}
 		ret = eio_map(dmc, q, bio);
@@ -500,17 +496,17 @@ int eio_get_cache_list(unsigned long *arg)
 {
 	int error = 0;
 	unsigned int size, i, j;
-	cache_list_t reclist;
-	cache_rec_short_t *cache_recs;
+	struct cache_list reclist;
+	struct cache_rec_short *cache_recs;
 	struct cache_c *dmc;
 
-	if (copy_from_user(&reclist, (cache_list_t __user *)arg,
-			   sizeof(cache_list_t))) {
+	if (copy_from_user(&reclist, (struct cache_list __user *)arg,
+			   sizeof(struct cache_list))) {
 		error = -EFAULT;
 		goto out;
 	}
 
-	size = reclist.ncaches * sizeof(cache_rec_short_t);
+	size = reclist.ncaches * sizeof(struct cache_rec_short);
 	cache_recs = vmalloc(size);
 	if (!cache_recs) {
 		error = -ENOMEM;
@@ -540,8 +536,8 @@ int eio_get_cache_list(unsigned long *arg)
 		goto out;
 	}
 
-	if (copy_to_user((cache_list_t __user *)arg, &reclist,
-			 sizeof(cache_list_t))) {
+	if (copy_to_user((struct cache_list __user *)arg, &reclist,
+			 sizeof(struct cache_list))) {
 		error = -EFAULT;
 		goto out;
 	}
@@ -550,13 +546,13 @@ out:
 	return error;
 }
 
-static void eio_cache_rec_fill(struct cache_c *dmc, cache_rec_short_t *rec)
+static void eio_cache_rec_fill(struct cache_c *dmc, struct cache_rec_short *rec)
 {
-	strncpy(rec->cr_name, dmc->cache_name, sizeof(rec->cr_name));
+	strncpy(rec->cr_name, dmc->cache_name, sizeof(rec->cr_name) - 1);
 	strncpy(rec->cr_src_devname, dmc->disk_devname,
-		sizeof(rec->cr_src_devname));
+		sizeof(rec->cr_src_devname) - 1);
 	strncpy(rec->cr_ssd_devname, dmc->cache_devname,
-		sizeof(rec->cr_ssd_devname));
+		sizeof(rec->cr_ssd_devname) - 1);
 	rec->cr_src_dev_size = eio_get_device_size(dmc->disk_dev);
 	rec->cr_ssd_dev_size = eio_get_device_size(dmc->cache_dev);
 	rec->cr_src_sector_size = 0;    /* unused in userspace */
@@ -647,7 +643,7 @@ static void eio_endio(struct bio *bio, int error)
 	struct eio_context *io;
 
 	io = bio->bi_private;
-	VERIFY(io != NULL);
+	EIO_ASSERT(io != NULL);
 
 	bio_put(bio);
 
@@ -710,7 +706,7 @@ static int eio_dispatch_io_pages(struct cache_c *dmc,
 
 	} while (remaining);
 
-	VERIFY(remaining_bvecs == 0);
+	EIO_ASSERT(remaining_bvecs == 0);
 	return ret;
 }
 
@@ -776,7 +772,7 @@ static int eio_dispatch_io(struct cache_c *dmc, struct eio_io_region *where,
 
 	} while (remaining);
 
-	VERIFY(remaining_bvecs == 0);
+	EIO_ASSERT(remaining_bvecs == 0);
 	return ret;
 }
 
@@ -821,7 +817,7 @@ retry:
 			goto retry;
 		}
 
-		VERIFY(io != NULL);
+		EIO_ASSERT(io != NULL);
 		mempool_free(io, _io_pool);
 		io = NULL;
 		return err;
@@ -899,8 +895,8 @@ void eio_process_zero_size_bio(struct cache_c *dmc, struct bio *origbio)
 	/* Extract bio flags from original bio */
 	rw_flags = origbio->bi_rw;
 
-	VERIFY(origbio->bi_size == 0);
-	VERIFY(rw_flags != 0);
+	EIO_ASSERT(origbio->bi_size == 0);
+	EIO_ASSERT(rw_flags != 0);
 
 	eio_issue_empty_barrier_flush(dmc->cache_dev->bdev, NULL,
 				      EIO_SSD_DEVICE, NULL, rw_flags);
@@ -962,7 +958,7 @@ static int eio_finish_nrdirty(struct cache_c *dmc)
 		pr_debug("finish_nrdirty: Draining I/O inflight\n");
 		schedule_timeout(msecs_to_jiffies(1));
 	}
-	VERIFY(!(dmc->sysctl_active.do_clean & EIO_CLEAN_START));
+	EIO_ASSERT(!(dmc->sysctl_active.do_clean & EIO_CLEAN_START));
 
 	dmc->sysctl_active.do_clean |= EIO_CLEAN_KEEP | EIO_CLEAN_START;
 	up_write(&eio_ttc_lock[index]);
@@ -1011,7 +1007,7 @@ int eio_cache_edit(char *cache_name, u_int32_t mode, u_int32_t policy)
 	int restart_async_task = 0;
 	int ret;
 
-	VERIFY((mode != 0) || (policy != 0));
+	EIO_ASSERT((mode != 0) || (policy != 0));
 
 	dmc = eio_cache_lookup(cache_name);
 	if (NULL == dmc) {
@@ -1080,9 +1076,9 @@ int eio_cache_edit(char *cache_name, u_int32_t mode, u_int32_t policy)
 				dmc->cache_name);
 			goto out;
 		}
-		VERIFY((dmc->sysctl_active.do_clean & EIO_CLEAN_KEEP) &&
+		EIO_ASSERT((dmc->sysctl_active.do_clean & EIO_CLEAN_KEEP) &&
 		       !(dmc->sysctl_active.do_clean & EIO_CLEAN_START));
-		VERIFY(dmc->sysctl_active.fast_remove ||
+		EIO_ASSERT(dmc->sysctl_active.fast_remove ||
 		       (atomic64_read(&dmc->nr_dirty) == 0));
 	}
 
@@ -1097,7 +1093,7 @@ int eio_cache_edit(char *cache_name, u_int32_t mode, u_int32_t policy)
 
 	pr_debug("cache_edit: Blocking application I/O\n");
 
-	VERIFY(atomic64_read(&dmc->nr_ios) == 0);
+	EIO_ASSERT(atomic64_read(&dmc->nr_ios) == 0);
 
 	/* policy change */
 	if ((policy != 0) && (policy != dmc->req_policy)) {
@@ -1146,7 +1142,7 @@ out:
 	/* Restart async-task for "WB" cache. */
 	if ((dmc->mode == CACHE_MODE_WB) && (restart_async_task == 1)) {
 		pr_debug("cache_edit: Restarting the clean_thread.\n");
-		VERIFY(dmc->clean_thread == NULL);
+		EIO_ASSERT(dmc->clean_thread == NULL);
 		ret = eio_start_clean_thread(dmc);
 		if (ret) {
 			error = ret;
@@ -1176,7 +1172,7 @@ static int eio_mode_switch(struct cache_c *dmc, u_int32_t mode)
 	int error = 0;
 	u_int32_t orig_mode;
 
-	VERIFY(dmc->mode != mode);
+	EIO_ASSERT(dmc->mode != mode);
 	pr_debug("eio_mode_switch: mode switch from %u to %u\n",
 		 dmc->mode, mode);
 
@@ -1193,7 +1189,7 @@ static int eio_mode_switch(struct cache_c *dmc, u_int32_t mode)
 		eio_free_wb_resources(dmc);
 		dmc->mode = mode;
 	} else {                /* (RO -> WT) or (WT -> RO) */
-		VERIFY(((dmc->mode == CACHE_MODE_RO) && (mode == CACHE_MODE_WT))
+		EIO_ASSERT(((dmc->mode == CACHE_MODE_RO) && (mode == CACHE_MODE_WT))
 		       || ((dmc->mode == CACHE_MODE_WT) &&
 			   (mode == CACHE_MODE_RO)));
 		dmc->mode = mode;
@@ -1215,7 +1211,7 @@ static int eio_policy_switch(struct cache_c *dmc, u_int32_t policy)
 {
 	int error;
 
-	VERIFY(dmc->req_policy != policy);
+	EIO_ASSERT(dmc->req_policy != policy);
 
 	eio_policy_free(dmc);
 
@@ -1337,7 +1333,7 @@ int eio_alloc_wb_bvecs(struct bio_vec *bvec, int max, int blksize)
 				iovec[i].bv_offset = 0;
 			} else {
 				/* Let the odd biovec share page allocated earlier. */
-				VERIFY(page != NULL);
+				EIO_ASSERT(page != NULL);
 				iovec[i].bv_page = page;
 				iovec[i].bv_len = to_bytes(blksize);
 				iovec[i].bv_offset =
@@ -1461,7 +1457,7 @@ struct bio_vec *eio_alloc_pages(u_int32_t max_pages, int *page_count)
 	/* following can be commented out later...
 	 * we may have less pages allocated.
 	 */
-	VERIFY(pcount == nr_pages);
+	EIO_ASSERT(pcount == nr_pages);
 
 	/* Set the return values here */
 	*page_count = pcount;
@@ -1492,7 +1488,7 @@ int eio_reboot_handling(void)
 			    EIO_HANDLE_REBOOT);
 		return 0;
 	}
-	VERIFY(eio_reboot_notified == 0);
+	EIO_ASSERT(eio_reboot_notified == 0);
 	eio_reboot_notified = EIO_REBOOT_HANDLING_INPROG;
 
 	for (i = 0; i < EIO_HASHTBL_SIZE; i++) {
@@ -1515,8 +1511,8 @@ int eio_reboot_handling(void)
 				schedule_timeout(msecs_to_jiffies(10));
 			}
 
-			VERIFY(atomic64_read(&dmc->nr_ios) == 0);
-			VERIFY(dmc->cache_rdonly == 0);
+			EIO_ASSERT(atomic64_read(&dmc->nr_ios) == 0);
+			EIO_ASSERT(dmc->cache_rdonly == 0);
 
 			/*
 			 * Shutdown processing has the highest priority.
@@ -1525,7 +1521,7 @@ int eio_reboot_handling(void)
 
 			spin_lock_irqsave(&dmc->cache_spin_lock,
 					  dmc->cache_spin_lock_flags);
-			VERIFY(!
+			EIO_ASSERT(!
 			       (dmc->
 				cache_flags & CACHE_FLAGS_SHUTDOWN_INPROG));
 			dmc->cache_flags |= CACHE_FLAGS_SHUTDOWN_INPROG;
@@ -1661,12 +1657,12 @@ static struct bio *eio_split_new_bio(struct bio *bio, struct bio_container *bc,
 	if (!cbio)
 		return NULL;
 
-	VERIFY(bio->bi_io_vec[*bvec_idx].bv_len >= iosize);
+	EIO_ASSERT(bio->bi_io_vec[*bvec_idx].bv_len >= iosize);
 
 	if (bio->bi_io_vec[*bvec_idx].bv_len <= *bvec_consumed) {
-		VERIFY(bio->bi_io_vec[*bvec_idx].bv_len == *bvec_consumed);
+		EIO_ASSERT(bio->bi_io_vec[*bvec_idx].bv_len == *bvec_consumed);
 		(*bvec_idx)++;
-		VERIFY(bio->bi_vcnt > *bvec_idx);
+		EIO_ASSERT(bio->bi_vcnt > *bvec_idx);
 		*bvec_consumed = 0;
 	}
 

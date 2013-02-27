@@ -54,7 +54,6 @@ mempool_t *_io_pool;            /* pool of eio_context object */
 
 atomic_t nr_cache_jobs;
 
-extern int eio_reboot_notified;
 
 LIST_HEAD(ssd_rm_list);
 int ssd_rm_list_not_empty;
@@ -243,7 +242,7 @@ static void eio_kcached_client_destroy(struct cache_c *dmc)
 /* Store the cache superblock on ssd */
 int eio_sb_store(struct cache_c *dmc)
 {
-	eio_superblock_t *sb = NULL;
+	union eio_superblock *sb = NULL;
 	struct eio_io_region where;
 	int error;
 
@@ -261,7 +260,7 @@ int eio_sb_store(struct cache_c *dmc)
 
 	page_count = 0;
 	nr_pages = EIO_SUPERBLOCK_SIZE / PAGE_SIZE;
-	VERIFY(nr_pages != 0);
+	EIO_ASSERT(nr_pages != 0);
 
 	sb_pages = eio_alloc_pages(nr_pages, &page_count);
 	if (sb_pages == NULL) {
@@ -269,11 +268,11 @@ int eio_sb_store(struct cache_c *dmc)
 		return -ENOMEM;
 	}
 
-	VERIFY(page_count == nr_pages);
+	EIO_ASSERT(page_count == nr_pages);
 
 	nr_pages = page_count;
 	page_index = 0;
-	sb = (eio_superblock_t *)kmap(sb_pages[page_index].bv_page);
+	sb = (union eio_superblock *)kmap(sb_pages[page_index].bv_page);
 
 	sb->sbf.cache_sb_state = dmc->sb_state;
 	sb->sbf.block_size = dmc->block_size;
@@ -468,7 +467,7 @@ int eio_md_store(struct cache_c *dmc)
 
 	if (next_ptr != (struct flash_cacheblock *)pg_virt_addr[0]) {
 		/* Write the remaining last page out */
-		VERIFY(slots_written > 0);
+		EIO_ASSERT(slots_written > 0);
 
 		where.count = slots_written / MD_BLOCKS_PER_SECTOR;
 
@@ -516,7 +515,7 @@ int eio_md_store(struct cache_c *dmc)
 	sectors_expected = dmc->size / MD_BLOCKS_PER_SECTOR;
 	if (dmc->size % MD_BLOCKS_PER_SECTOR)
 		sectors_expected++;
-	VERIFY(sectors_expected == sectors_written);
+	EIO_ASSERT(sectors_expected == sectors_written);
 	/* XXX: should we call eio_sb_store() on error ?? */
 	if (sectors_expected != sectors_written) {
 		pr_err
@@ -573,7 +572,7 @@ sb_store:
 static int eio_md_create(struct cache_c *dmc, int force, int cold)
 {
 	struct flash_cacheblock *next_ptr;
-	eio_superblock_t *header;
+	union eio_superblock *header;
 	struct eio_io_region where;
 	sector_t i;
 	int j, error;
@@ -597,8 +596,8 @@ static int eio_md_create(struct cache_c *dmc, int force, int cold)
 		return -ENOMEM;
 	}
 
-	VERIFY(page_count = 1);
-	header = (eio_superblock_t *)kmap(header_page[0].bv_page);
+	EIO_ASSERT(page_count = 1);
+	header = (union eio_superblock *)kmap(header_page[0].bv_page);
 
 	/*
 	 * Apart from normal cache creation, eio_md_create() is also called when
@@ -842,7 +841,7 @@ static int eio_md_create(struct cache_c *dmc, int force, int cold)
 
 		if (next_ptr != (struct flash_cacheblock *)pg_virt_addr[0]) {
 			/* Write the remaining last page out */
-			VERIFY(slots_written > 0);
+			EIO_ASSERT(slots_written > 0);
 
 			where.count = slots_written / MD_BLOCKS_PER_SECTOR;
 
@@ -954,7 +953,7 @@ free_header:
 static int eio_md_load(struct cache_c *dmc)
 {
 	struct flash_cacheblock *meta_data_cacheblock, *next_ptr;
-	eio_superblock_t *header;
+	union eio_superblock *header;
 	struct eio_io_region where;
 	int i;
 	index_t j, slots_read;
@@ -979,8 +978,8 @@ static int eio_md_load(struct cache_c *dmc)
 		return -ENOMEM;
 	}
 
-	VERIFY(page_count == 1);
-	header = (eio_superblock_t *)kmap(header_page[0].bv_page);
+	EIO_ASSERT(page_count == 1);
+	header = (union eio_superblock *)kmap(header_page[0].bv_page);
 
 	if (CACHE_FAILED_IS_SET(dmc) || CACHE_DEGRADED_IS_SET(dmc)) {
 		pr_err
@@ -1270,7 +1269,7 @@ static int eio_md_load(struct cache_c *dmc)
 						    (u_int8_t)next_ptr->
 						    cache_state & ~QUEUED);
 
-				VERIFY((EIO_CACHE_STATE_GET(dmc, i) &
+				EIO_ASSERT((EIO_CACHE_STATE_GET(dmc, i) &
 					(VALID | INVALID))
 				       != (VALID | INVALID));
 
@@ -1375,7 +1374,7 @@ static int eio_clean_thread_init(struct cache_c *dmc)
 }
 
 int
-eio_handle_ssd_message(char *cache_name, char *ssd_name, dev_notifier_t note)
+eio_handle_ssd_message(char *cache_name, char *ssd_name, enum dev_notifier note)
 {
 	struct cache_c *dmc;
 
@@ -1452,7 +1451,7 @@ static void eio_init_srcdev_props(struct cache_c *dmc)
 		dmc->cache_srcdisk_name[0] = '\0';
 }
 
-int eio_cache_create(cache_rec_short_t *cache)
+int eio_cache_create(struct cache_rec_short *cache)
 {
 	struct cache_c *dmc;
 	struct cache_c **nodepp;
@@ -2025,7 +2024,7 @@ int eio_cache_delete(char *cache_name, int do_delete)
 	}
 
 	if (!CACHE_FAILED_IS_SET(dmc))
-		VERIFY(dmc->sysctl_active.fast_remove
+		EIO_ASSERT(dmc->sysctl_active.fast_remove
 		       || (atomic64_read(&dmc->nr_dirty) == 0));
 
 	/*
@@ -2070,7 +2069,7 @@ force_delete:
 
 out:
 	if (restart_async_task) {
-		VERIFY(dmc->clean_thread == NULL);
+		EIO_ASSERT(dmc->clean_thread == NULL);
 		error = eio_start_clean_thread(dmc);
 		if (error)
 			pr_err
@@ -2112,7 +2111,7 @@ int eio_ctr_ssd_add(struct cache_c *dmc, char *dev)
 	fmode_t mode = (FMODE_READ | FMODE_WRITE);
 
 	/* verify if source device is present */
-	VERIFY(dmc->eio_errors.no_source_dev == 0);
+	EIO_ASSERT(dmc->eio_errors.no_source_dev == 0);
 
 	/* mimic relevant portions from eio_ctr() */
 
@@ -2219,10 +2218,10 @@ void eio_stop_async_tasks(struct cache_c *dmc)
 
 int eio_start_clean_thread(struct cache_c *dmc)
 {
-	VERIFY(dmc->clean_thread == NULL);
-	VERIFY(dmc->mode == CACHE_MODE_WB);
-	VERIFY(dmc->clean_thread_running == 0);
-	VERIFY(!(dmc->sysctl_active.do_clean & EIO_CLEAN_START));
+	EIO_ASSERT(dmc->clean_thread == NULL);
+	EIO_ASSERT(dmc->mode == CACHE_MODE_WB);
+	EIO_ASSERT(dmc->clean_thread_running == 0);
+	EIO_ASSERT(!(dmc->sysctl_active.do_clean & EIO_CLEAN_START));
 
 	dmc->clean_thread = eio_create_thread(eio_clean_thread_proc,
 					      (void *)dmc, "eio_clean_thread");
@@ -2237,10 +2236,10 @@ int eio_allocate_wb_resources(struct cache_c *dmc)
 	unsigned iosize;
 	int ret;
 
-	VERIFY(dmc->clean_dbvecs == NULL);
-	VERIFY(dmc->clean_mdpages == NULL);
-	VERIFY(dmc->dbvec_count == 0);
-	VERIFY(dmc->mdpage_count == 0);
+	EIO_ASSERT(dmc->clean_dbvecs == NULL);
+	EIO_ASSERT(dmc->clean_mdpages == NULL);
+	EIO_ASSERT(dmc->dbvec_count == 0);
+	EIO_ASSERT(dmc->mdpage_count == 0);
 
 	/* Data page allocations are done in terms of "bio_vec" structures */
 	iosize = (dmc->block_size * dmc->assoc) << SECTOR_SHIFT;
@@ -2257,7 +2256,7 @@ int eio_allocate_wb_resources(struct cache_c *dmc)
 	ret = eio_alloc_wb_bvecs(dmc->clean_dbvecs, nr_bvecs, dmc->block_size);
 	if (ret)
 		goto errout;
-	VERIFY(dmc->clean_dbvecs != NULL);
+	EIO_ASSERT(dmc->clean_dbvecs != NULL);
 	dmc->dbvec_count = nr_bvecs;
 
 	/* Metadata page allocations are done in terms of pages only */
@@ -2279,7 +2278,7 @@ int eio_allocate_wb_resources(struct cache_c *dmc)
 				  dmc->block_size);
 		goto errout;
 	}
-	VERIFY(dmc->clean_mdpages != NULL);
+	EIO_ASSERT(dmc->clean_mdpages != NULL);
 	dmc->mdpage_count = nr_pages;
 
 	/*
@@ -2306,7 +2305,7 @@ int eio_allocate_wb_resources(struct cache_c *dmc)
 		spin_lock_init(&dmc->dirty_set_lru_lock);
 		ret = eio_clean_thread_init(dmc);
 	}
-	VERIFY(dmc->mdupdate_q == NULL);
+	EIO_ASSERT(dmc->mdupdate_q == NULL);
 	dmc->mdupdate_q = create_singlethread_workqueue("eio_mdupdate");
 	if (!dmc->mdupdate_q)
 		ret = -ENOMEM;
@@ -2389,7 +2388,7 @@ eio_notify_reboot(struct notifier_block *this, unsigned long code, void *x)
 			    EIO_HANDLE_REBOOT);
 		return NOTIFY_DONE;
 	}
-	VERIFY(eio_reboot_notified == 0);
+	EIO_ASSERT(eio_reboot_notified == 0);
 	eio_reboot_notified = EIO_REBOOT_HANDLING_INPROG;
 
 	(void)wait_on_bit_lock((void *)&eio_control->synch_flags,
@@ -2459,7 +2458,7 @@ eio_notify_ssd_rm(struct notifier_block *nb, unsigned long action, void *data)
 	unsigned long int flags = 0;
 	struct ssd_rm_list *ssd_list_ptr;
 	unsigned check_src = 0, check_ssd = 0;
-	dev_notifier_t notify = NOTIFY_INITIALIZER;
+	enum dev_notifier notify = NOTIFY_INITIALIZER;
 
 	if (likely(action != BUS_NOTIFY_DEL_DEVICE))
 		return 0;
