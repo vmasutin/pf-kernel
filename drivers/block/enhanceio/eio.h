@@ -72,19 +72,32 @@
 #ifndef EIO_INC_H
 #define EIO_INC_H
 
-#define EIO_DBN_SET(dmc, index, dbn)            ssdcache_dbn_set(dmc, index, dbn)
-#define EIO_DBN_GET(dmc, index)                 ssdcache_dbn_get(dmc, index)
-#define EIO_CACHE_STATE_SET(dmc, index, state)  ssdcache_cache_state_set(dmc, index, state)
-#define EIO_CACHE_STATE_GET(dmc, index)         ssdcache_cache_state_get(dmc, index)
-#define EIO_CACHE_STATE_OFF(dmc, index, bitmask)        ssdcache_cache_state_off(dmc, index, bitmask)
-#define EIO_CACHE_STATE_ON(dmc, index, bitmask) ssdcache_cache_state_on(dmc, index, bitmask)
-
 /* Bit offsets for wait_on_bit_lock() */
 #define EIO_UPDATE_LIST         0
 #define EIO_HANDLE_REBOOT       1
 
+
+static __inline__ uint32_t
+EIO_DIV(uint64_t dividend_64, uint32_t divisor_32)
+{
+	uint64_t result;
+	result = dividend_64;
+	do_div(result, divisor_32);
+	return result;
+}
+
+
+static __inline__ uint32_t
+EIO_REM(uint64_t dividend_64, uint32_t divisor_32)
+{
+	uint64_t temp;
+	temp = dividend_64;
+	return do_div(temp, divisor_32);
+}
+
+
 struct eio_control_s {
-	volatile unsigned long synch_flags;
+	unsigned long synch_flags;
 };
 
 int eio_wait_schedule(void *unused);
@@ -202,34 +215,30 @@ extern mempool_t *_job_pool;
 
 union eio_superblock {
 	struct superblock_fields {
-		sector_t size;                  /* Cache size */
-		u_int32_t block_size;           /* Cache block size */
-		u_int32_t assoc;                /* Cache associativity */
-		u_int32_t cache_sb_state;       /* Clean shutdown ? */
+		__le64 size;                  /* Cache size */
+		__le32 block_size;           /* Cache block size */
+		__le32 assoc;                /* Cache associativity */
+		__le32 cache_sb_state;       /* Clean shutdown ? */
 		char cache_devname[DEV_PATHLEN];
-		sector_t cache_devsize;
+		__le64 cache_devsize;
 		char disk_devname[DEV_PATHLEN];
-		sector_t disk_devsize;
-		u_int32_t cache_version;
+		__le64 disk_devsize;
+		__le32 cache_version;
 		char cache_name[DEV_PATHLEN];
-		u_int32_t mode;
-		u_int32_t repl_policy;
-		u_int32_t cache_flags;
-		/*
-		 * Version 1.1 superblock ends here.
-		 * Don't modify any of the above fields.
-		 */
-		u_int32_t magic;                /* Has to be the 1st field afer 1.1 superblock */
-		u_int32_t cold_boot;            /* cache to be started as cold after boot */
+		__le32 mode;
+		__le32 repl_policy;
+		__le32 cache_flags;
+		__le32 magic;                
+		__le32 cold_boot;            /* cache to be started as cold after boot */
 		char ssd_uuid[DEV_PATHLEN];
-		sector_t cache_md_start_sect;   /* cache metadata start (8K aligned) */
-		sector_t cache_data_start_sect; /* cache data start (8K aligned) */
-		u_int32_t dirty_high_threshold;
-		u_int32_t dirty_low_threshold;
-		u_int32_t dirty_set_high_threshold;
-		u_int32_t dirty_set_low_threshold;
-		u_int32_t time_based_clean_interval;
-		u_int32_t autoclean_threshold;
+		__le64 cache_md_start_sect;   /* cache metadata start (8K aligned) */
+		__le64 cache_data_start_sect; /* cache data start (8K aligned) */
+		__le32 dirty_high_threshold;
+		__le32 dirty_low_threshold;
+		__le32 dirty_set_high_threshold;
+		__le32 dirty_set_low_threshold;
+		__le32 time_based_clean_interval;
+		__le32 autoclean_threshold;
 	} sbf;
 	u_int8_t padding[EIO_SUPERBLOCK_SIZE];
 };
@@ -273,9 +282,6 @@ union eio_superblock {
  */
 struct flash_cacheblock {
 	sector_t dbn;           /* Sector number of the cached block */
-#ifdef DO_CHECKSUM
-	u_int64_t checksum;
-#endif                          /* DO_CHECKSUM */
 	u_int32_t cache_state;
 };
 
@@ -314,8 +320,8 @@ struct flash_cacheblock {
 #define INDEX_TO_MD_PAGE_OFFSET(INDEX)          ((INDEX) % MD_BLOCKS_PER_PAGE)
 
 #define MD_BLOCKS_PER_SECTOR                    (512 / (sizeof(struct flash_cacheblock)))
-#define INDEX_TO_MD_SECTOR(INDEX)               ((INDEX) / MD_BLOCKS_PER_SECTOR)
-#define INDEX_TO_MD_SECTOR_OFFSET(INDEX)        ((INDEX) % MD_BLOCKS_PER_SECTOR)
+#define INDEX_TO_MD_SECTOR(INDEX)               (EIO_DIV((INDEX), MD_BLOCKS_PER_SECTOR))
+#define INDEX_TO_MD_SECTOR_OFFSET(INDEX)        (EIO_REM((INDEX), MD_BLOCKS_PER_SECTOR))
 #define MD_BLOCKS_PER_CBLOCK(dmc)               (MD_BLOCKS_PER_SECTOR * (dmc)->block_size)
 
 #define METADATA_IO_BLOCKSIZE                   (256 * 1024)
@@ -427,7 +433,7 @@ enum dev_notifier {
 #define MAX_CLEAN_IOS_TOTAL     4
 
 /*
- * Harish: TBD
+ * TBD
  * Rethink on max, min, default values
  */
 #define DIRTY_HIGH_THRESH_DEF           30
@@ -450,27 +456,6 @@ enum dev_notifier {
  * Subsection 2: Data structures.
  */
 
-/*
- * Block checksums :
- * Block checksums seem a good idea (especially for debugging, I found a couple
- * of bugs with this), but in practice there are a number of issues with this
- * in production.
- * 1) If a flash write fails, there is no guarantee that the failure was atomic.
- * Some sectors may have been written to flash. If so, the checksum we have
- * is wrong. We could re-read the flash block and recompute the checksum, but
- * the read could fail too.
- * 2) On a node crash, we could have crashed between the flash data write and the
- * flash metadata update (which updates the new checksum to flash metadata). When
- * we reboot, the checksum we read from metadata is wrong. This is worked around
- * by having the cache load recompute checksums after an unclean shutdown.
- * 3) Checksums require 4 or 8 more bytes per block in terms of metadata overhead.
- * Especially because the metadata is wired into memory.
- * 4) Checksums force us to do a flash metadata IO on a block re-dirty. If we
- * didn't maintain checksums, we could avoid the metadata IO on a re-dirty.
- * Therefore in production we disable block checksums.
- *
- * Use the Makefile to enable/disable DO_CHECKSUM
- */
 typedef void (*eio_notify_fn)(int error, void *context);
 
 /*
@@ -544,7 +529,7 @@ struct mdupdate_request {
 	struct eio_bio *pending_mdlist; /* ebios pending for md update */
 	struct eio_bio *inprog_mdlist;  /* ebios processed for md update */
 	int error;                      /* error during md update */
-	struct mdupdate_request *next;  /* next mdreq in the mdreq list .Harish: TBD. Deprecate */
+	struct mdupdate_request *next;  /* next mdreq in the mdreq list .TBD. Deprecate */
 };
 
 #define SETFLAG_CLEAN_INPROG    0x00000001      /* clean in progress on a set */
@@ -584,10 +569,10 @@ struct eio_stats {
 	atomic64_t write_hits;          /* Number of write hits (includes dirty write hits) */
 	atomic64_t dirty_write_hits;    /* Number of "dirty" write hits */
 	atomic64_t cached_blocks;       /* Number of cached blocks */
-	atomic64_t rd_replace;          /* Number of read cache replacements. Harish: TBD modify def doc */
-	atomic64_t wr_replace;          /* Number of write cache replacements. Harish: TBD modify def doc */
+	atomic64_t rd_replace;          /* Number of read cache replacements. TBD modify def doc */
+	atomic64_t wr_replace;          /* Number of write cache replacements. TBD modify def doc */
 	atomic64_t noroom;              /* No room in set */
-	atomic64_t cleanings;           /* blocks cleaned Harish: TBD modify def doc */
+	atomic64_t cleanings;           /* blocks cleaned TBD modify def doc */
 	atomic64_t md_write_dirty;      /* Metadata sector writes dirtying block */
 	atomic64_t md_write_clean;      /* Metadata sector writes cleaning block */
 	atomic64_t md_ssd_writes;       /* How many md ssd writes did we do ? */
@@ -629,23 +614,22 @@ struct set_seq {
 
 /* EIO system control variables(tunables) */
 /*
- * vloatile are used here since the cost a strong synchonisation
- * is not worth the benefits.
+ * Adding synchonization is not worth the benefits.
  */
 struct eio_sysctl {
-	volatile uint32_t error_inject;
-	volatile int32_t fast_remove;
-	volatile int32_t zerostats;
-	volatile int32_t do_clean;
-	volatile uint32_t dirty_high_threshold;
-	volatile uint32_t dirty_low_threshold;
-	volatile uint32_t dirty_set_high_threshold;
-	volatile uint32_t dirty_set_low_threshold;
-	volatile uint32_t time_based_clean_interval;    /* time after which dirty sets should clean */
-	volatile int32_t autoclean_threshold;
-	volatile int32_t mem_limit_pct;
-	volatile int32_t control;
-	volatile u_int64_t invalidate;
+	uint32_t error_inject;
+	int32_t fast_remove;
+	int32_t zerostats;
+	int32_t do_clean;
+	uint32_t dirty_high_threshold;
+	uint32_t dirty_low_threshold;
+	uint32_t dirty_set_high_threshold;
+	uint32_t dirty_set_low_threshold;
+	uint32_t time_based_clean_interval;    /* time after which dirty sets should clean */
+	int32_t autoclean_threshold;
+	int32_t mem_limit_pct;
+	int32_t control;
+	u_int64_t invalidate;
 };
 
 /* forward declaration */
@@ -715,7 +699,7 @@ struct cache_c {
 	long unsigned int cache_spin_lock_flags;        /* See comments above spin_lock_irqsave_FLAGS */
 	atomic_t nr_jobs;                               /* Number of I/O jobs */
 
-	volatile u_int32_t cache_flags;
+	u_int32_t cache_flags;
 	u_int32_t sb_state;     /* Superblock state */
 	u_int32_t sb_version;   /* Superblock version */
 
@@ -789,8 +773,8 @@ struct cache_c {
 	 ((dmc)->sysctl_active.autoclean_threshold == 0))
 
 #define DIRTY_CACHE_THRESHOLD_CROSSED(dmc)	\
-	(((atomic64_read(&(dmc)->nr_dirty) - atomic64_read(&(dmc)->clean_pendings)) >= \
-	  (int64_t)((dmc)->sysctl_active.dirty_high_threshold * (dmc)->size) / 100) && \
+	((atomic64_read(&(dmc)->nr_dirty) - atomic64_read(&(dmc)->clean_pendings)) >= \
+	  (int64_t)((dmc)->sysctl_active.dirty_high_threshold * EIO_DIV((dmc)->size, 100)) && \
 	 ((dmc)->sysctl_active.dirty_high_threshold > (dmc)->sysctl_active.dirty_low_threshold))
 
 #define DIRTY_SET_THRESHOLD_CROSSED(dmc, set)	\
