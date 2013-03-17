@@ -28,7 +28,7 @@ case "$1" in
 
 		CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
 		echo "Compiling using $CPUS_COUNT thread(s)"
-		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers
+		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers kernel_source kernel_debug
 		;;
 	ubuntu-i686)
 		echo Preparing necessary files...
@@ -36,7 +36,7 @@ case "$1" in
 
 		CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
 		echo "Compiling using $CPUS_COUNT thread(s)"
-		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers
+		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers kernel_source kernel_debug
 		;;
 	debian)
 		echo Preparing necessary files...
@@ -44,7 +44,7 @@ case "$1" in
 
 		CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
 		echo "Compiling using $CPUS_COUNT thread(s)"
-		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers
+		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers kernel_source kernel_debug
 		;;
 	debian-i686)
 		echo Preparing necessary files...
@@ -52,7 +52,7 @@ case "$1" in
 
 		CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
 		echo "Compiling using $CPUS_COUNT thread(s)"
-		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers
+		CONCURRENCY_LEVEL=$CPUS_COUNT LOCALVERSION="" make-kpkg --rootcmd fakeroot --initrd --revision 1 kernel_image kernel_headers kernel_source kernel_debug
 		;;
 	*)
 		echo Unsupported distro given. Please, try enother.
