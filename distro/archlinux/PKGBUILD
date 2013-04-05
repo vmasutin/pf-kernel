@@ -1,6 +1,6 @@
 pkgname=('linux38-pf' 'linux38-pf-headers')
-pkgver=3.8.1
-pkgrel=pf
+pkgver=3.8.1-pf
+pkgrel=1
 pkgdesc="pf-kernel with modules"
 arch=('i686' 'x86_64')
 makedepends=('xz' 'rsync')
