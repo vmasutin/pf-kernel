@@ -1,13 +1,11 @@
 # vim: ft=sh
 #!/usr/bin/env bash
-BASE="3"
-BRANCH="8"
 
 case "$1" in
 	arch)
 		echo Preparing necessary files...
 		cp distro/archlinux/PKGBUILD .
-		cp distro/archlinux/linux"$BASE""$BRANCH"-pf.install .
+		cp distro/archlinux/linux-pf.install .
 		cp distro/archlinux/arch.config .config
 
 		echo Building pf-kernel...
@@ -16,7 +14,7 @@ case "$1" in
 	arch-i686)
 		echo Preparing necessary files...
 		cp distro/archlinux/PKGBUILD .
-		cp distro/archlinux/linux"$BASE""$BRANCH"-pf.install .
+		cp distro/archlinux/linux-pf.install .
 		cp distro/archlinux/arch-i686.config .config
 
 		echo Building pf-kernel...
