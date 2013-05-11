@@ -166,7 +166,7 @@ static void toi_mark_task_as_pageset(struct task_struct *t, int pageset2)
 
 		for (posn = vma->vm_start; posn < vma->vm_end;
 				posn += PAGE_SIZE) {
-			struct page *page = follow_page(vma, posn, 0);
+			struct page *page = follow_page(vma, posn, FOLL_SPLIT);
 			struct address_space *mapping;
 
 			if (!page || !pfn_valid(page_to_pfn(page)))
