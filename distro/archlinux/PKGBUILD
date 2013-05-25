@@ -1,9 +1,9 @@
 pkgname=('linux-pf' 'linux-pf-headers')
-pkgver=3.9.3
+pkgver=3.9.4
 pkgrel=1
 pkgdesc="pf-kernel with modules"
 arch=('i686' 'x86_64')
-makedepends=('xz' 'rsync')
+makedepends=('xz' 'rsync' 'bc')
 options=('!strip')
 license=('GPL')
 url="http://pf.natalenko.name/"
