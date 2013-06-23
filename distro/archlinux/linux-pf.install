@@ -1,4 +1,4 @@
-KERNEL_VERSION="3.9.5"
+KERNEL_VERSION="3.10.0"
 LOCAL_VERSION="-pf"
 
 post_install () {
