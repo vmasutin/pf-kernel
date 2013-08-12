@@ -1,14 +1,8 @@
 VERSION = 3
 PATCHLEVEL = 10
-<<<<<<< HEAD
 SUBLEVEL = 1
 EXTRAVERSION = -pf
 NAME = Unicycling Gorilla
-=======
-SUBLEVEL = 6
-EXTRAVERSION =
-NAME = TOSSUG Baby Fish
->>>>>>> linux-stable/linux-3.10.y
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
