@@ -5387,13 +5387,13 @@ EXPORT_SYMBOL_GPL(set_cpus_allowed_ptr);
 extern struct task_struct *cpu_stopper_task;
 /* Run through task list and find tasks affined to just the dead cpu, then
  * allocate a new affinity */
-static void break_sole_affinity(int src_cpu, struct task_struct *idle)
+static void break_sole_affinity(int src_cpu)
 {
 	struct task_struct *p, *t, *stopper;
 
 	stopper = per_cpu(cpu_stopper_task, src_cpu);
 	do_each_thread(t, p) {
-		if (p != stopper && p != idle && !online_cpus(p)) {
+		if (p != stopper && !online_cpus(p)) {
 			cpumask_copy(tsk_cpus_allowed(p), cpu_possible_mask);
 			/*
 			 * Don't tell them about moving exiting tasks or
@@ -5405,6 +5405,8 @@ static void break_sole_affinity(int src_cpu, struct task_struct *idle)
 				       "longer affine to cpu %d\n",
 				       task_pid_nr(p), p->comm, src_cpu);
 			}
+			if (task_curr(p))
+				resched_task(p);
 		}
 		clear_sticky(p);
 	} while_each_thread(t, p);
@@ -5683,7 +5685,7 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 			BUG_ON(!cpumask_test_cpu(cpu, rq->rd->span));
 			set_rq_offline(rq);
 		}
-		break_sole_affinity(cpu, idle);
+		break_sole_affinity(cpu);
 		grq.noc = num_online_cpus();
 		grq_unlock_irqrestore(&flags);
 		break;
@@ -5709,6 +5711,9 @@ static int sched_cpu_active(struct notifier_block *nfb,
 	case CPU_STARTING:
 	case CPU_DOWN_FAILED:
 		set_cpu_active((long)hcpu, true);
+		grq_lock();
+		grq.noc = num_online_cpus();
+		grq_unlock();
 		return NOTIFY_OK;
 	default:
 		return NOTIFY_DONE;
@@ -5718,9 +5723,16 @@ static int sched_cpu_active(struct notifier_block *nfb,
 static int sched_cpu_inactive(struct notifier_block *nfb,
 					unsigned long action, void *hcpu)
 {
+	int cpu = (long)hcpu;
+	unsigned long flags;
+
 	switch (action & ~CPU_TASKS_FROZEN) {
 	case CPU_DOWN_PREPARE:
-		set_cpu_active((long)hcpu, false);
+		grq_lock_irqsave(&flags);
+		break_sole_affinity(cpu);
+		set_cpu_active(cpu, false);
+		grq.noc = num_online_cpus();
+		grq_unlock_irqrestore(&flags);
 		return NOTIFY_OK;
 	default:
 		return NOTIFY_DONE;
