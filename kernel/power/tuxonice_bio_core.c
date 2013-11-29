@@ -1706,7 +1706,7 @@ static int toi_bio_parse_sig_location(char *commandline,
 
 	signature_found = toi_bio_image_exists(quiet);
 
-	if (signature_found != -1) {
+	if ( signature_found > 0 ) {
 		result = 0;
 		/*
 		 * TODO: If only file storage, CAN_HIBERNATE should only be
@@ -1714,11 +1714,11 @@ static int toi_bio_parse_sig_location(char *commandline,
 		 */
 		set_toi_state(TOI_CAN_HIBERNATE);
 		set_toi_state(TOI_CAN_RESUME);
-	} else
+	} else if (signature_found < 0 ) {
 		if (!quiet)
 			printk(KERN_ERR "TuxOnIce: Block I/O: No "
 				"signature found at %s.\n", devstart);
-
+	}
 	return result;
 }
 
