@@ -5405,6 +5405,7 @@ static void bind_zero(int src_cpu)
 		}
 		clear_sticky(p);
 	} while_each_thread(t, p);
+
 	if (bound) {
 		printk(KERN_INFO "Removed affinity for %d processes to cpu %d\n",
 		       bound, src_cpu);
@@ -5422,7 +5423,9 @@ static void unbind_zero(int src_cpu)
 		return;
 
 	do_each_thread(t, p) {
-		if (p->mm && p->zerobound) {
+		if (!p->mm)
+			p->zerobound = false;
+		if (p->zerobound) {
 			unbound++;
 			cpumask_set_cpu(src_cpu, tsk_cpus_allowed(p));
 			/* Once every CPU affinity has been re-enabled, remove
@@ -5746,7 +5749,7 @@ static int sched_cpu_active(struct notifier_block *nfb,
 	switch (action & ~CPU_TASKS_FROZEN) {
 	case CPU_STARTING:
 	case CPU_DOWN_FAILED:
-		set_cpu_active((long)hcpu, false);
+		set_cpu_active((long)hcpu, true);
 		return NOTIFY_OK;
 	default:
 		return NOTIFY_DONE;
@@ -6860,34 +6863,66 @@ match2:
 	mutex_unlock(&sched_domains_mutex);
 }
 
+static int num_cpus_frozen;	/* used to mark begin/end of suspend/resume */
+
 /*
  * Update cpusets according to cpu_active mask.  If cpusets are
  * disabled, cpuset_update_active_cpus() becomes a simple wrapper
  * around partition_sched_domains().
+ *
+ * If we come here as part of a suspend/resume, don't touch cpusets because we
+ * want to restore it back to its original state upon resume anyway.
  */
 static int cpuset_cpu_active(struct notifier_block *nfb, unsigned long action,
 			     void *hcpu)
 {
-	switch (action & ~CPU_TASKS_FROZEN) {
+	switch (action) {
+	case CPU_ONLINE_FROZEN:
+	case CPU_DOWN_FAILED_FROZEN:
+
+		/*
+		 * num_cpus_frozen tracks how many CPUs are involved in suspend
+		 * resume sequence. As long as this is not the last online
+		 * operation in the resume sequence, just build a single sched
+		 * domain, ignoring cpusets.
+		 */
+		num_cpus_frozen--;
+		if (likely(num_cpus_frozen)) {
+			partition_sched_domains(1, NULL, NULL);
+			break;
+		}
+
+		/*
+		 * This is the last CPU online operation. So fall through and
+		 * restore the original sched domains by considering the
+		 * cpuset configurations.
+		 */
+
 	case CPU_ONLINE:
 	case CPU_DOWN_FAILED:
 		cpuset_update_active_cpus(true);
-		return NOTIFY_OK;
+		break;
 	default:
 		return NOTIFY_DONE;
 	}
+	return NOTIFY_OK;
 }
 
 static int cpuset_cpu_inactive(struct notifier_block *nfb, unsigned long action,
 			       void *hcpu)
 {
-	switch (action & ~CPU_TASKS_FROZEN) {
+	switch (action) {
 	case CPU_DOWN_PREPARE:
 		cpuset_update_active_cpus(false);
-		return NOTIFY_OK;
+		break;
+	case CPU_DOWN_PREPARE_FROZEN:
+		num_cpus_frozen++;
+		partition_sched_domains(1, NULL, NULL);
+		break;
 	default:
 		return NOTIFY_DONE;
 	}
+	return NOTIFY_OK;
 }
 
 #if defined(CONFIG_SCHED_SMT) || defined(CONFIG_SCHED_MC)
