@@ -5385,63 +5385,29 @@ EXPORT_SYMBOL_GPL(set_cpus_allowed_ptr);
 
 #ifdef CONFIG_HOTPLUG_CPU
 extern struct task_struct *cpu_stopper_task;
-/* Run through task list and find tasks affined to the dead cpu, then remove
- * that cpu from the list, enable cpu0 and set the zerobound flag. */
-static void bind_zero(int src_cpu)
+/* Run through task list and find tasks affined to just the dead cpu, then
+ * allocate a new affinity */
+static void break_sole_affinity(int src_cpu, struct task_struct *idle)
 {
 	struct task_struct *p, *t, *stopper;
-	int bound = 0;
-
-	if (src_cpu == 0)
-		return;
 
 	stopper = per_cpu(cpu_stopper_task, src_cpu);
 	do_each_thread(t, p) {
-		if (p != stopper && cpu_isset(src_cpu, *tsk_cpus_allowed(p))) {
-			cpumask_clear_cpu(src_cpu, tsk_cpus_allowed(p));
-			cpumask_set_cpu(0, tsk_cpus_allowed(p));
-			p->zerobound = true;
-			bound++;
+		if (p != stopper && p != idle && !online_cpus(p)) {
+			cpumask_copy(tsk_cpus_allowed(p), cpu_possible_mask);
+			/*
+			 * Don't tell them about moving exiting tasks or
+			 * kernel threads (both mm NULL), since they never
+			 * leave kernel.
+			 */
+			if (p->mm && printk_ratelimit()) {
+				printk(KERN_INFO "process %d (%s) no "
+				       "longer affine to cpu %d\n",
+				       task_pid_nr(p), p->comm, src_cpu);
+			}
 		}
 		clear_sticky(p);
 	} while_each_thread(t, p);
-	if (bound) {
-		printk(KERN_INFO "Removed affinity for %d processes to cpu %d\n",
-		       bound, src_cpu);
-	}
-}
-
-/* Find processes with the zerobound flag and reenable their affinity for the
- * CPU coming alive. */
-static void unbind_zero(int src_cpu)
-{
-	int unbound = 0, zerobound = 0;
-	struct task_struct *p, *t;
-
-	if (src_cpu == 0)
-		return;
-
-	do_each_thread(t, p) {
-		if (p->mm && p->zerobound) {
-			unbound++;
-			cpumask_set_cpu(src_cpu, tsk_cpus_allowed(p));
-			/* Once every CPU affinity has been re-enabled, remove
-			 * the zerobound flag */
-			if (cpumask_subset(cpu_possible_mask, tsk_cpus_allowed(p))) {
-				p->zerobound = false;
-				zerobound++;
-			}
-		}
-	} while_each_thread(t, p);
-
-	if (unbound) {
-		printk(KERN_INFO "Added affinity for %d processes to cpu %d\n",
-		       unbound, src_cpu);
-	}
-	if (zerobound) {
-		printk(KERN_INFO "Released forced binding to cpu0 for %d processes\n",
-		       zerobound);
-	}
 }
 
 /*
@@ -5458,10 +5424,7 @@ void idle_task_exit(void)
 		switch_mm(mm, &init_mm, current);
 	mmdrop(mm);
 }
-#else /* CONFIG_HOTPLUG_CPU */
-static void unbind_zero(int src_cpu) {}
 #endif /* CONFIG_HOTPLUG_CPU */
-
 void sched_set_stop_task(int cpu, struct task_struct *stop)
 {
 	struct sched_param stop_param = { .sched_priority = STOP_PRIO };
@@ -5700,7 +5663,6 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 
 			set_rq_online(rq);
 		}
-		unbind_zero(cpu);
 		grq.noc = num_online_cpus();
 		grq_unlock_irqrestore(&flags);
 		break;
@@ -5721,7 +5683,7 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 			BUG_ON(!cpumask_test_cpu(cpu, rq->rd->span));
 			set_rq_offline(rq);
 		}
-		bind_zero(cpu);
+		break_sole_affinity(cpu, idle);
 		grq.noc = num_online_cpus();
 		grq_unlock_irqrestore(&flags);
 		break;
@@ -5746,7 +5708,7 @@ static int sched_cpu_active(struct notifier_block *nfb,
 	switch (action & ~CPU_TASKS_FROZEN) {
 	case CPU_STARTING:
 	case CPU_DOWN_FAILED:
-		set_cpu_active((long)hcpu, false);
+		set_cpu_active((long)hcpu, true);
 		return NOTIFY_OK;
 	default:
 		return NOTIFY_DONE;
