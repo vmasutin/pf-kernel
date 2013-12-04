@@ -1,6 +1,6 @@
 pkgname=('linux-pf' 'linux-pf-headers')
 pkgver=3.12.1
-pkgrel=1
+pkgrel=2
 pkgdesc="pf-kernel with modules"
 arch=('i686' 'x86_64')
 makedepends=('xz' 'rsync' 'bc')
