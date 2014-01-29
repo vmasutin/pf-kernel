@@ -1180,7 +1180,7 @@ config HIGHMEM64G
 endchoice
 
 choice
-	prompt "Memory split" if EXPERT
+	prompt "Memory split"
 	default VMSPLIT_3G
 	depends on X86_32
 	---help---
@@ -1200,17 +1200,17 @@ choice
 	  option alone!
 
 	config VMSPLIT_3G
-		bool "3G/1G user/kernel split"
+		bool "Default 896MB lowmem (3G/1G user/kernel split)"
 	config VMSPLIT_3G_OPT
 		depends on !X86_PAE
-		bool "3G/1G user/kernel split (for full 1G low memory)"
+		bool "1GB lowmem (3G/1G user/kernel split)"
 	config VMSPLIT_2G
-		bool "2G/2G user/kernel split"
+		bool "2GB lowmem (2G/2G user/kernel split)"
 	config VMSPLIT_2G_OPT
 		depends on !X86_PAE
-		bool "2G/2G user/kernel split (for full 2G low memory)"
+		bool "2GB lowmem (2G/2G user/kernel split)"
 	config VMSPLIT_1G
-		bool "1G/3G user/kernel split"
+		bool "3GB lowmem (1G/3G user/kernel split)"
 endchoice
 
 config PAGE_OFFSET
@@ -1775,7 +1775,7 @@ config HOTPLUG_CPU
 config BOOTPARAM_HOTPLUG_CPU0
 	bool "Set default setting of cpu0_hotpluggable"
 	default n
-	depends on HOTPLUG_CPU
+	depends on HOTPLUG_CPU && !SCHED_BFS
 	---help---
 	  Set whether default state of cpu0_hotpluggable is on or off.
 
