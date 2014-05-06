@@ -449,7 +449,6 @@ void posix_cpu_timers_exit_group(struct task_struct *tsk)
 	cleanup_timers(tsk->signal->cpu_timers);
 }
 
-
 static inline int expires_gt(cputime_t expires, cputime_t new_exp)
 {
 	return expires == 0 || expires > new_exp;
