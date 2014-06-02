@@ -715,9 +715,9 @@ static void generate_free_page_map(void)
 static int size_of_free_region(struct zone *zone, unsigned long start_pfn)
 {
 	unsigned long this_pfn = start_pfn,
-		      end_pfn = zone->zone_start_pfn + zone->spanned_pages - 1;
+		      end_pfn = zone_end_pfn(zone);
 
-	while (pfn_valid(this_pfn) && this_pfn <= end_pfn && PageNosaveFree(pfn_to_page(this_pfn)))
+	while (pfn_valid(this_pfn) && this_pfn < end_pfn && PageNosaveFree(pfn_to_page(this_pfn)))
 		this_pfn++;
 
 	return this_pfn - start_pfn;
@@ -1052,6 +1052,9 @@ int toi_prepare_image(void)
 
 	if (attempt_to_freeze())
 		return 1;
+
+	lock_device_hotplug();
+	set_toi_state(TOI_DEVICE_HOTPLUG_LOCKED);
 
 	if (!extra_pd1_pages_allowance)
 		get_extra_pd1_allowance();

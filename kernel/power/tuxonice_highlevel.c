@@ -290,6 +290,7 @@ static int allocate_bitmaps(void)
 	    toi_alloc_bitmap(&io_map) ||
 	    toi_alloc_bitmap(&nosave_map) ||
 	    toi_alloc_bitmap(&free_map) ||
+	    toi_alloc_bitmap(&compare_map) ||
 	    toi_alloc_bitmap(&page_resave_map))
 		return 1;
 
@@ -320,6 +321,7 @@ static void free_bitmaps(void)
 	toi_free_bitmap(&io_map);
 	toi_free_bitmap(&nosave_map);
 	toi_free_bitmap(&free_map);
+	toi_free_bitmap(&compare_map);
 	toi_free_bitmap(&page_resave_map);
 }
 
@@ -444,6 +446,11 @@ static void do_cleanup(int get_debug_info, int restarting)
 		if (!test_toi_state(TOI_BOOT_KERNEL))
 			toi_free_page(37, boot_kernel_data_buffer);
 		boot_kernel_data_buffer = 0;
+	}
+
+	if (test_toi_state(TOI_DEVICE_HOTPLUG_LOCKED)) {
+		unlock_device_hotplug();
+		clear_toi_state(TOI_DEVICE_HOTPLUG_LOCKED);
 	}
 
 	clear_toi_state(TOI_BOOT_KERNEL);
