@@ -43,10 +43,10 @@ config IOSCHED_BFQ
 	tristate "BFQ I/O scheduler"
 	default n
 	---help---
-	  The BFQ I/O scheduler tries to distribute bandwidth among all
-	  processes according to their weights.
-	  It aims at distributing the bandwidth as desired, regardless of
-	  the device parameters and with any workload. It also tries to
+	  The BFQ I/O scheduler tries to distribute bandwidth among
+	  all processes according to their weights.
+	  It aims at distributing the bandwidth as desired, independently of
+	  the disk parameters and with any workload. It also tries to
 	  guarantee low latency to interactive and soft real-time
 	  applications. If compiled built-in (saying Y here), BFQ can
 	  be configured to support hierarchical scheduling.
@@ -79,8 +79,8 @@ choice
 		  Selects BFQ as the default I/O scheduler which will be
 		  used by default for all block devices.
 		  The BFQ I/O scheduler aims at distributing the bandwidth
-		  as desired, regardless of the disk parameters and with
-		  any workload. It also tries to guarantee a low latency to
+		  as desired, independently of the disk parameters and with
+		  any workload. It also tries to guarantee low latency to
 		  interactive and soft real-time applications.
 
 	config DEFAULT_NOOP
