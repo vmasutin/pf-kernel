@@ -71,6 +71,7 @@
 #include <linux/binfmts.h>
 #include <linux/context_tracking.h>
 #include <linux/sched/prio.h>
+#include <linux/sched/sysctl.h>
 
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
@@ -104,20 +105,10 @@
 #define ISO_PERIOD		((5 * HZ * grq.noc) + 1)
 
 /*
- * Convert user-nice values [ -20 ... 0 ... 19 ]
- * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
- * and back.
- */
-#define NICE_TO_PRIO(nice)	(MAX_RT_PRIO + (nice) + 20)
-#define PRIO_TO_NICE(prio)	((prio) - MAX_RT_PRIO - 20)
-#define TASK_NICE(p)		PRIO_TO_NICE((p)->static_prio)
-
-/*
  * 'User priority' is the nice value converted to something we
  * can work with better when scaling various scheduler parameters,
  * it's a [ 0 ... 39 ] range.
  */
-#define USER_PRIO(p)		((p) - MAX_RT_PRIO)
 #define TASK_USER_PRIO(p)	USER_PRIO((p)->static_prio)
 #define MAX_USER_PRIO		(USER_PRIO(MAX_PRIO))
 #define SCHED_PRIO(p)		((p) + MAX_RT_PRIO)
@@ -3774,18 +3765,6 @@ out:
 }
 
 /**
- * task_nice - return the nice value of a given task.
- * @p: the task in question.
- *
- * Return: The nice value [ -20 ... 0 ... 19 ].
- */
-int task_nice(const struct task_struct *p)
-{
-	return TASK_NICE(p);
-}
-EXPORT_SYMBOL_GPL(task_nice);
-
-/**
  * idle_cpu - is a given cpu idle currently?
  * @cpu: the processor in question.
  *
@@ -5040,11 +5019,14 @@ static inline struct sched_domain *lowest_flag_domain(int cpu, int flag)
  * selecting an idle cpu will add more delays to the timers than intended
  * (as that cpu's timer base may not be uptodate wrt jiffies etc).
  */
-int get_nohz_timer_target(void)
+int get_nohz_timer_target(int pinned)
 {
 	int cpu = smp_processor_id();
 	int i;
 	struct sched_domain *sd;
+
+	if (pinned || !get_sysctl_timer_migration() || !idle_cpu(cpu))
+		return cpu;
 
 	rcu_read_lock();
 	for_each_domain(cpu, sd) {
