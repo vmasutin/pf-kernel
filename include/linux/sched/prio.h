@@ -19,32 +19,23 @@
  */
 
 #ifdef CONFIG_SCHED_BFS
-#define MAX_USER_RT_PRIO        100
-#define MAX_RT_PRIO             (MAX_USER_RT_PRIO + 1)
-#define DEFAULT_PRIO            (MAX_RT_PRIO + 20)
+#define MAX_USER_RT_PRIO	100
+#define MAX_RT_PRIO		(MAX_USER_RT_PRIO + 1)
+#define DEFAULT_PRIO		(MAX_RT_PRIO + 20)
 
-#define PRIO_RANGE              (40)
-#define MAX_PRIO                (MAX_RT_PRIO + PRIO_RANGE)
-#define ISO_PRIO                (MAX_RT_PRIO)
-#define NORMAL_PRIO             (MAX_RT_PRIO + 1)
-#define IDLE_PRIO               (MAX_RT_PRIO + 2)
-#define PRIO_LIMIT              ((IDLE_PRIO) + 1)
-#define NICE_TO_PRIO(nice)	(MAX_RT_PRIO + (nice) + 20)
-#define PRIO_TO_NICE(prio)	((prio) - MAX_RT_PRIO - 20)
-#define USER_PRIO(p)		((p) - MAX_RT_PRIO)
-/*
- * Convert user-nice values [ -20 ... 0 ... 19 ]
- * to static priority [ MAX_RT_PRIO..MAX_PRIO-1 ],
- * and back.
- */
-#define TASK_NICE(p)		PRIO_TO_NICE((p)->static_prio)
-
+#define PRIO_RANGE		(40)
+#define MAX_PRIO		(MAX_RT_PRIO + PRIO_RANGE)
+#define ISO_PRIO		(MAX_RT_PRIO)
+#define NORMAL_PRIO		(MAX_RT_PRIO + 1)
+#define IDLE_PRIO		(MAX_RT_PRIO + 2)
+#define PRIO_LIMIT		((IDLE_PRIO) + 1)
 #else /* CONFIG_SCHED_BFS */
 #define MAX_USER_RT_PRIO	100
 #define MAX_RT_PRIO		MAX_USER_RT_PRIO
 
 #define MAX_PRIO		(MAX_RT_PRIO + NICE_WIDTH)
 #define DEFAULT_PRIO		(MAX_RT_PRIO + NICE_WIDTH / 2)
+#endif /* CONFIG_SCHED_BFS */
 
 /*
  * Convert user-nice values [ -20 ... 0 ... 19 ]
@@ -60,8 +51,6 @@
  * it's a [ 0 ... 39 ] range.
  */
 #define USER_PRIO(p)		((p)-MAX_RT_PRIO)
-#endif /* CONFIG_SCHED_BFS */
-
 #define TASK_USER_PRIO(p)	USER_PRIO((p)->static_prio)
 #define MAX_USER_PRIO		(USER_PRIO(MAX_PRIO))
 

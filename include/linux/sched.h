@@ -2215,17 +2215,10 @@ extern int task_prio(const struct task_struct *p);
  *
  * Return: The nice value [ -20 ... 0 ... 19 ].
  */
-#ifdef CONFIG_SCHED_BFS
-static inline int task_nice(const struct task_struct *p)
-{
-	return TASK_NICE(p);
-}
-#else /* CONFIG_SCHED_BFS */
 static inline int task_nice(const struct task_struct *p)
 {
 	return PRIO_TO_NICE((p)->static_prio);
 }
-#endif /* CONFIG_SCHED_BFS */
 extern int can_nice(const struct task_struct *p, const int nice);
 extern int task_curr(const struct task_struct *p);
 extern int idle_cpu(int cpu);

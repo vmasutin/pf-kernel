@@ -70,7 +70,6 @@
 #include <linux/init_task.h>
 #include <linux/binfmts.h>
 #include <linux/context_tracking.h>
-#include <linux/sched/prio.h>
 #include <linux/sched/sysctl.h>
 
 #include <asm/switch_to.h>
@@ -104,13 +103,7 @@
 
 #define ISO_PERIOD		((5 * HZ * grq.noc) + 1)
 
-/*
- * 'User priority' is the nice value converted to something we
- * can work with better when scaling various scheduler parameters,
- * it's a [ 0 ... 39 ] range.
- */
-#define TASK_USER_PRIO(p)	USER_PRIO((p)->static_prio)
-#define MAX_USER_PRIO		(USER_PRIO(MAX_PRIO))
+
 #define SCHED_PRIO(p)		((p) + MAX_RT_PRIO)
 #define STOP_PRIO		(MAX_RT_PRIO - 1)
 
@@ -699,6 +692,21 @@ static bool suitable_idle_cpus(struct task_struct *p)
 	return (cpus_intersects(p->cpus_allowed, grq.cpu_idle_map));
 }
 
+#ifdef CONFIG_SCHED_SMT
+/* All this CPU's SMT siblings are idle */
+inline bool siblings_rq_idle(struct rq *rq)
+{
+	return cpumask_subset(&(rq->smt_siblings), &grq.cpu_idle_map);
+}
+#endif
+#ifdef CONFIG_SCHED_MC
+/* All this CPU's shared cache siblings are idle */
+inline bool cache_rq_idle(struct rq *rq)
+{
+	return cpumask_subset(&(rq->cache_siblings), &grq.cpu_idle_map);
+}
+#endif
+
 #define CPUIDLE_DIFF_THREAD	(1)
 #define CPUIDLE_DIFF_CORE	(2)
 #define CPUIDLE_CACHE_BUSY	(4)
@@ -728,6 +736,31 @@ static inline bool scaling_rq(struct rq *rq);
 static void
 resched_best_mask(int best_cpu, struct rq *rq, cpumask_t *tmpmask)
 {
+	static const int locality2ranking[] = {
+		/*locality 0*/
+		0,
+		/*locality 1*/
+#ifdef CONFIG_SCHED_SMT
+		CPUIDLE_DIFF_THREAD,
+#else
+		0,
+#endif
+		/*locality 2*/
+#ifdef CONFIG_SCHED_MC
+		CPUIDLE_DIFF_CORE,
+#else
+		0,
+#endif
+		/*locality 3*/
+		CPUIDLE_DIFF_CPU,
+		/*locality 4*/
+#ifdef CONFIG_NUMA
+		CPUIDLE_DIFF_NODE,
+#else
+		0,
+#endif
+	};
+
 	int best_ranking = CPUIDLE_DIFF_NODE | CPUIDLE_THROTTLED |
 		CPUIDLE_THREAD_BUSY | CPUIDLE_DIFF_CPU | CPUIDLE_CACHE_BUSY |
 		CPUIDLE_DIFF_CORE | CPUIDLE_DIFF_THREAD;
@@ -744,23 +777,13 @@ resched_best_mask(int best_cpu, struct rq *rq, cpumask_t *tmpmask)
 		tmp_rq = cpu_rq(cpu_tmp);
 
 		locality = rq->cpu_locality[cpu_tmp];
-#ifdef CONFIG_NUMA
-		if (locality > 3)
-			ranking |= CPUIDLE_DIFF_NODE;
-		else
-#endif
-		if (locality > 2)
-			ranking |= CPUIDLE_DIFF_CPU;
+		ranking = locality2ranking[locality];
 #ifdef CONFIG_SCHED_MC
-		else if (locality == 2)
-			ranking |= CPUIDLE_DIFF_CORE;
-		if (!(tmp_rq->cache_idle(cpu_tmp)))
+		if (!cache_rq_idle(tmp_rq))
 			ranking |= CPUIDLE_CACHE_BUSY;
 #endif
 #ifdef CONFIG_SCHED_SMT
-		if (locality == 1)
-			ranking |= CPUIDLE_DIFF_THREAD;
-		if (!(tmp_rq->siblings_idle(cpu_tmp)))
+		if (!siblings_rq_idle(tmp_rq))
 			ranking |= CPUIDLE_THREAD_BUSY;
 #endif
 		if (scaling_rq(tmp_rq))
@@ -1910,7 +1933,7 @@ static inline void finish_task_switch(struct rq *rq, struct task_struct *prev)
  * schedule_tail - first thing a freshly forked thread must call.
  * @prev: the thread we just switched away from.
  */
-asmlinkage void schedule_tail(struct task_struct *prev)
+asmlinkage __visible void schedule_tail(struct task_struct *prev)
 	__releases(grq.lock)
 {
 	struct rq *rq = this_rq();
@@ -2248,18 +2271,12 @@ static void update_rq_clock_task(struct rq *rq, s64 delta)
 #ifdef CONFIG_PARAVIRT_TIME_ACCOUNTING
 	if (static_key_false((&paravirt_steal_rq_enabled))) {
 		s64 steal = paravirt_steal_clock(cpu_of(rq));
-		u64 st;
-
 		steal -= rq->prev_steal_time_rq;
 
 		if (unlikely(steal > delta))
 			steal = delta;
 
-		st = steal_ticks(steal);
-		steal = st * TICK_NSEC;
-
 		rq->prev_steal_time_rq += steal;
-
 		delta -= steal;
 	}
 #endif
@@ -2443,7 +2460,7 @@ static void pc_user_time(struct rq *rq, struct task_struct *p,
 		}
 	}
 
-	if (TASK_NICE(p) > 0 || idleprio_task(p)) {
+	if (task_nice(p) > 0 || idleprio_task(p)) {
 		rq->nice_pc += pc;
 		if (rq->nice_pc >= 128) {
 			cpustat[CPUTIME_NICE] += (__force u64)cputime_one_jiffy * rq->nice_pc / 128;
@@ -2670,7 +2687,7 @@ static void account_guest_time(struct task_struct *p, cputime_t cputime,
 	p->gtime += (__force u64)cputime;
 
 	/* Add guest time to cpustat. */
-	if (TASK_NICE(p) > 0) {
+	if (task_nice(p) > 0) {
 		cpustat[CPUTIME_NICE] += (__force u64)cputime;
 		cpustat[CPUTIME_GUEST_NICE] += (__force u64)cputime;
 	} else {
@@ -3185,6 +3202,13 @@ static noinline void __schedule_bug(struct task_struct *prev)
 	print_modules();
 	if (irqs_disabled())
 		print_irqtrace_events(prev);
+#ifdef CONFIG_DEBUG_PREEMPT
+	if (in_atomic_preempt_off()) {
+		pr_err("Preemption disabled at:");
+		print_ip_sym(current->preempt_disable_ip);
+		pr_cont("\n");
+	}
+#endif
 	dump_stack();
 	add_taint(TAINT_WARN, LOCKDEP_STILL_OK);
 }
@@ -3269,7 +3293,7 @@ static void reset_rq_task(struct rq *rq, struct task_struct *p)
  *          - return from syscall or exception to user-space
  *          - return from interrupt-handler to user-space
  */
-asmlinkage void __sched schedule(void)
+asmlinkage __visible void __sched schedule(void)
 {
 	struct task_struct *prev, *next, *idle;
 	unsigned long *switch_count;
@@ -3425,7 +3449,7 @@ rerun_prev_unlocked:
 EXPORT_SYMBOL(schedule);
 
 #ifdef CONFIG_RCU_USER_QS
-asmlinkage void __sched schedule_user(void)
+asmlinkage __visible void __sched schedule_user(void)
 {
 	/*
 	 * If we come here after a random call to set_need_resched(),
@@ -3457,7 +3481,7 @@ void __sched schedule_preempt_disabled(void)
  * off of preempt_enable. Kernel preemptions off return from interrupt
  * occur there and call schedule directly.
  */
-asmlinkage void __sched notrace preempt_schedule(void)
+asmlinkage __visible void __sched notrace preempt_schedule(void)
 {
 	/*
 	 * If there is a non-zero preempt_count or interrupts are disabled,
@@ -3487,7 +3511,7 @@ EXPORT_SYMBOL(preempt_schedule);
  * Note, that this is called and return with irqs disabled. This will
  * protect us against recursive calling from irq.
  */
-asmlinkage void __sched preempt_schedule_irq(void)
+asmlinkage __visible void __sched preempt_schedule_irq(void)
 {
 	enum ctx_state prev_state;
 
@@ -3520,6 +3544,7 @@ int default_wake_function(wait_queue_t *curr, unsigned mode, int wake_flags,
 }
 EXPORT_SYMBOL(default_wake_function);
 
+/*
 static long __sched
 sleep_on_common(wait_queue_head_t *q, int state, long timeout)
 {
@@ -3565,6 +3590,7 @@ long __sched sleep_on_timeout(wait_queue_head_t *q, long timeout)
 	return sleep_on_common(q, TASK_UNINTERRUPTIBLE, timeout);
 }
 EXPORT_SYMBOL(sleep_on_timeout);
+*/
 
 #ifdef CONFIG_RT_MUTEXES
 
@@ -3576,7 +3602,8 @@ EXPORT_SYMBOL(sleep_on_timeout);
  * This function changes the 'effective' priority of a task. It does
  * not touch ->normal_prio like __setscheduler().
  *
- * Used by the rt_mutex code to implement priority inheritance logic.
+ * Used by the rt_mutex code to implement priority inheritance
+ * logic. Call site only calls if the priority of the task changed.
  */
 void rt_mutex_setprio(struct task_struct *p, int prio)
 {
@@ -3640,7 +3667,7 @@ void set_user_nice(struct task_struct *p, long nice)
 	unsigned long flags;
 	struct rq *rq;
 
-	if (TASK_NICE(p) == nice || nice < -20 || nice > 19)
+	if (task_nice(p) == nice || nice < MIN_NICE || nice > MAX_NICE)
 		return;
 	new_static = NICE_TO_PRIO(nice);
 	/*
@@ -3718,11 +3745,11 @@ SYSCALL_DEFINE1(nice, int, increment)
 	if (increment > 40)
 		increment = 40;
 
-	nice = TASK_NICE(current) + increment;
-	if (nice < -20)
-		nice = -20;
-	if (nice > 19)
-		nice = 19;
+	nice = task_nice(current) + increment;
+	if (nice < MIN_NICE)
+		nice = MIN_NICE;
+	if (nice > MAX_NICE)
+		nice = MAX_NICE;
 
 	if (increment < 0 && !can_nice(current, nice))
 		return -EPERM;
@@ -4184,6 +4211,7 @@ SYSCALL_DEFINE2(sched_setparam, pid_t, pid, struct sched_param __user *, param)
  * sys_sched_setattr - same as above, but with extended sched_attr
  * @pid: the pid in question.
  * @uattr: structure containing the extended parameters.
+ * @flags: for future extension.
  */
 SYSCALL_DEFINE3(sched_setattr, pid_t, pid, struct sched_attr __user *, uattr,
 			       unsigned int, flags)
@@ -4247,7 +4275,7 @@ out_nounlock:
  */
 SYSCALL_DEFINE2(sched_getparam, pid_t, pid, struct sched_param __user *, param)
 {
-	struct sched_param lp;
+	struct sched_param lp = { .sched_priority = 0 };
 	struct task_struct *p;
 	int retval = -EINVAL;
 
@@ -4264,7 +4292,8 @@ SYSCALL_DEFINE2(sched_getparam, pid_t, pid, struct sched_param __user *, param)
 	if (retval)
 		goto out_unlock;
 
-	lp.sched_priority = p->rt_priority;
+	if (has_rt_policy(p))
+		lp.sched_priority = p->rt_priority;
 	rcu_read_unlock();
 
 	/*
@@ -4326,6 +4355,7 @@ err_size:
  * @pid: the pid in question.
  * @uattr: structure containing the extended parameters.
  * @size: sizeof(attr) for fwd/bwd comp.
+ * @flags: for future extension.
  */
 SYSCALL_DEFINE4(sched_getattr, pid_t, pid, struct sched_attr __user *, uattr,
 		unsigned int, size, unsigned int, flags)
@@ -4351,10 +4381,12 @@ SYSCALL_DEFINE4(sched_getattr, pid_t, pid, struct sched_attr __user *, uattr,
 		goto out_unlock;
 
 	attr.sched_policy = p->policy;
+        if (p->sched_reset_on_fork)
+	                attr.sched_flags |= SCHED_FLAG_RESET_ON_FORK;
 	if (rt_task(p))
 		attr.sched_priority = p->rt_priority;
 	else
-		attr.sched_nice = TASK_NICE(p);
+		attr.sched_nice = task_nice(p);
 
 	rcu_read_unlock();
 
@@ -5031,9 +5063,10 @@ int get_nohz_timer_target(int pinned)
 	rcu_read_lock();
 	for_each_domain(cpu, sd) {
 		for_each_cpu(i, sched_domain_span(sd)) {
-			if (!idle_cpu(i))
+			if (!idle_cpu(i)) {
 				cpu = i;
-			goto unlock;
+				goto unlock;
+			}
 		}
 	}
 unlock:
@@ -5222,8 +5255,10 @@ void idle_task_exit(void)
 
 	BUG_ON(cpu_online(smp_processor_id()));
 
-	if (mm != &init_mm)
+	if (mm != &init_mm) {
 		switch_mm(mm, &init_mm, current);
+		finish_arch_post_lock_switch();
+	}
 	mmdrop(mm);
 }
 #else /* CONFIG_HOTPLUG_CPU */
@@ -5351,9 +5386,12 @@ sd_alloc_ctl_domain_table(struct sched_domain *sd)
 		sizeof(int), 0644, proc_dointvec_minmax);
 	set_table_entry(&table[10], "flags", &sd->flags,
 		sizeof(int), 0644, proc_dointvec_minmax);
-	set_table_entry(&table[11], "name", sd->name,
+	set_table_entry(&table[11], "max_newidle_lb_cost",
+		&sd->max_newidle_lb_cost,
+		sizeof(long), 0644, proc_doulongvec_minmax, false);
+	set_table_entry(&table[12], "name", sd->name,
 		CORENAME_MAX_SIZE, 0444, proc_dostring);
-	/* &table[12] is terminator */
+	/* &table[13] is terminator */
 
 	return table;
 }
@@ -5512,7 +5550,6 @@ static int sched_cpu_active(struct notifier_block *nfb,
 				      unsigned long action, void *hcpu)
 {
 	switch (action & ~CPU_TASKS_FROZEN) {
-	case CPU_STARTING:
 	case CPU_DOWN_FAILED:
 		set_cpu_active((long)hcpu, true);
 		return NOTIFY_OK;
@@ -6075,6 +6112,8 @@ sd_numa_init(struct sched_domain_topology_level *tl, int cpu)
 					,
 		.last_balance		= jiffies,
 		.balance_interval	= sd_weight,
+		.max_newidle_lb_cost    = 0,
+		.next_decay_max_lb_cost = jiffies,
 	};
 	SD_INIT_NAME(sd, NUMA);
 	sd->private = &tl->data;
@@ -6459,7 +6498,7 @@ static cpumask_var_t fallback_doms;
  * cpu core maps. It is supposed to return 1 if the topology changed
  * or 0 if it stayed the same.
  */
-int __attribute__((weak)) arch_update_cpu_topology(void)
+int __weak arch_update_cpu_topology(void)
 {
 	return 0;
 }
@@ -6691,33 +6730,6 @@ static int cpuset_cpu_inactive(struct notifier_block *nfb, unsigned long action,
 	return NOTIFY_OK;
 }
 
-#if defined(CONFIG_SCHED_SMT) || defined(CONFIG_SCHED_MC)
-/*
- * Cheaper version of the below functions in case support for SMT and MC is
- * compiled in but CPUs have no siblings.
- */
-static bool sole_cpu_idle(int cpu)
-{
-	return rq_idle(cpu_rq(cpu));
-}
-#endif
-#ifdef CONFIG_SCHED_SMT
-/* All this CPU's SMT siblings are idle */
-static bool siblings_cpu_idle(int cpu)
-{
-	return cpumask_subset(&(cpu_rq(cpu)->smt_siblings),
-			      &grq.cpu_idle_map);
-}
-#endif
-#ifdef CONFIG_SCHED_MC
-/* All this CPU's shared cache siblings are idle */
-static bool cache_cpu_idle(int cpu)
-{
-	return cpumask_subset(&(cpu_rq(cpu)->cache_siblings),
-			      &grq.cpu_idle_map);
-}
-#endif
-
 enum sched_domain_level {
 	SD_LV_NONE = 0,
 	SD_LV_SIBLING,
@@ -6803,19 +6815,6 @@ void __init sched_init_smp(void)
 					rq->cpu_locality[other_cpu] = locality;
 			}
 		}
-
-		/*
-		 * Each runqueue has its own function in case it doesn't have
-		 * siblings of its own allowing mixed topologies.
-		 */
-#ifdef CONFIG_SCHED_SMT
-		if (cpus_weight(rq->smt_siblings) > 1)
-			rq->siblings_idle = siblings_cpu_idle;
-#endif
-#ifdef CONFIG_SCHED_MC
-		if (cpus_weight(rq->cache_siblings) > 1)
-			rq->cache_idle = cache_cpu_idle;
-#endif
 	}
 	grq_unlock_irq();
 	mutex_unlock(&sched_domains_mutex);
@@ -6889,16 +6888,11 @@ void __init sched_init(void)
 #ifdef CONFIG_SCHED_SMT
 		cpumask_clear(&rq->smt_siblings);
 		cpumask_set_cpu(i, &rq->smt_siblings);
-		rq->siblings_idle = sole_cpu_idle;
-		cpumask_set_cpu(i, &rq->smt_siblings);
 #endif
 #ifdef CONFIG_SCHED_MC
 		cpumask_clear(&rq->cache_siblings);
 		cpumask_set_cpu(i, &rq->cache_siblings);
-		rq->cache_idle = sole_cpu_idle;
-		cpumask_set_cpu(i, &rq->cache_siblings);
 #endif
-		rq->cpu_locality = kmalloc(nr_cpu_ids * sizeof(int *), GFP_ATOMIC);
 		for_each_possible_cpu(j) {
 			if (i == j)
 				rq->cpu_locality[j] = 0;
@@ -6953,7 +6947,8 @@ void __might_sleep(const char *file, int line, int preempt_offset)
 	static unsigned long prev_jiffy;	/* ratelimiting */
 
 	rcu_sleep_check(); /* WARN_ON_ONCE() by default, no rate limit reqd. */
-	if ((preempt_count_equals(preempt_offset) && !irqs_disabled()) ||
+	if ((preempt_count_equals(preempt_offset) && !irqs_disabled()) &&
+		!is_idle_task(current)) ||
 	    system_state != SYSTEM_RUNNING || oops_in_progress)
 		return;
 	if (time_before(jiffies, prev_jiffy + HZ) && prev_jiffy)
@@ -6971,6 +6966,13 @@ void __might_sleep(const char *file, int line, int preempt_offset)
 	debug_show_held_locks(current);
 	if (irqs_disabled())
 		print_irqtrace_events(current);
+#ifdef CONFIG_DEBUG_PREEMPT
+	if (!preempt_count_equals(preempt_offset)) {
+		pr_err("Preemption disabled at:");
+		print_ip_sym(current->preempt_disable_ip);
+		pr_cont("\n");
+	}
+#endif
 	dump_stack();
 }
 EXPORT_SYMBOL(__might_sleep);
