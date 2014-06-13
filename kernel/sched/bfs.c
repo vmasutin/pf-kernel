@@ -72,6 +72,7 @@
 #include <linux/context_tracking.h>
 #include <linux/sched/sysctl.h>
 
+#include <asm/irq_regs.h>
 #include <asm/switch_to.h>
 #include <asm/tlb.h>
 #include <asm/unistd.h>
