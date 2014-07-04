@@ -125,7 +125,7 @@
 
 void print_scheduler_version(void)
 {
-	printk(KERN_INFO "BFS CPU scheduler v0.448 by Con Kolivas.\n");
+	printk(KERN_INFO "BFS CPU scheduler v0.449 by Con Kolivas.\n");
 }
 
 /*
@@ -6677,19 +6677,25 @@ static bool sole_cpu_idle(int cpu)
 }
 #endif
 #ifdef CONFIG_SCHED_SMT
+static const cpumask_t *thread_cpumask(int cpu)
+{
+	return topology_thread_cpumask(cpu);
+}
 /* All this CPU's SMT siblings are idle */
 static bool siblings_cpu_idle(int cpu)
 {
-	return cpumask_subset(&(cpu_rq(cpu)->smt_siblings),
-			      &grq.cpu_idle_map);
+	return cpumask_subset(thread_cpumask(cpu), &grq.cpu_idle_map);
 }
 #endif
 #ifdef CONFIG_SCHED_MC
+static const cpumask_t *core_cpumask(int cpu)
+{
+	return topology_core_cpumask(cpu);
+}
 /* All this CPU's shared cache siblings are idle */
 static bool cache_cpu_idle(int cpu)
 {
-	return cpumask_subset(&(cpu_rq(cpu)->cache_siblings),
-			      &grq.cpu_idle_map);
+	return cpumask_subset(core_cpumask(cpu), &grq.cpu_idle_map);
 }
 #endif
 
@@ -6707,7 +6713,7 @@ enum sched_domain_level {
 void __init sched_init_smp(void)
 {
 	struct sched_domain *sd;
-	int cpu;
+	int cpu, other_cpu;
 
 	cpumask_var_t non_isolated_cpus;
 
@@ -6749,33 +6755,14 @@ void __init sched_init_smp(void)
 	for_each_online_cpu(cpu) {
 		struct rq *rq = cpu_rq(cpu);
 
+		/* First check if this cpu is in the same node */
 		for_each_domain(cpu, sd) {
-			int locality, other_cpu;
-
-#ifdef CONFIG_SCHED_SMT
-			if (sd->level == SD_LV_SIBLING) {
-				for_each_cpu_mask(other_cpu, *sched_domain_span(sd))
-					cpumask_set_cpu(other_cpu, &rq->smt_siblings);
-			}
-#endif
-#ifdef CONFIG_SCHED_MC
-			if (sd->level == SD_LV_MC) {
-				for_each_cpu_mask(other_cpu, *sched_domain_span(sd))
-					cpumask_set_cpu(other_cpu, &rq->cache_siblings);
-			}
-#endif
-			if (sd->level <= SD_LV_SIBLING)
-				locality = 1;
-			else if (sd->level <= SD_LV_MC)
-				locality = 2;
-			else if (sd->level <= SD_LV_NODE)
-				locality = 3;
-			else
+			if (sd->level > SD_LV_NODE)
 				continue;
-
+			/* Set locality to local node if not already found lower */
 			for_each_cpu_mask(other_cpu, *sched_domain_span(sd)) {
-				if (locality < rq->cpu_locality[other_cpu])
-					rq->cpu_locality[other_cpu] = locality;
+				if (rq->cpu_locality[other_cpu] > 3)
+					rq->cpu_locality[other_cpu] = 3;
 			}
 		}
 
@@ -6783,17 +6770,32 @@ void __init sched_init_smp(void)
 		 * Each runqueue has its own function in case it doesn't have
 		 * siblings of its own allowing mixed topologies.
 		 */
-#ifdef CONFIG_SCHED_SMT
-		if (cpus_weight(rq->smt_siblings) > 1)
-			rq->siblings_idle = siblings_cpu_idle;
-#endif
 #ifdef CONFIG_SCHED_MC
-		if (cpus_weight(rq->cache_siblings) > 1)
+		for_each_cpu_mask(other_cpu, *core_cpumask(cpu)) {
+			if (rq->cpu_locality[other_cpu] > 2)
+				rq->cpu_locality[other_cpu] = 2;
+		}
+		if (cpus_weight(*core_cpumask(cpu)) > 1)
 			rq->cache_idle = cache_cpu_idle;
+#endif
+#ifdef CONFIG_SCHED_SMT
+		for_each_cpu_mask(other_cpu, *thread_cpumask(cpu))
+			rq->cpu_locality[other_cpu] = 1;
+		if (cpus_weight(*thread_cpumask(cpu)) > 1)
+			rq->siblings_idle = siblings_cpu_idle;
 #endif
 	}
 	grq_unlock_irq();
 	mutex_unlock(&sched_domains_mutex);
+
+	for_each_online_cpu(cpu) {
+		struct rq *rq = cpu_rq(cpu);
+		for_each_online_cpu(other_cpu) {
+			if (other_cpu <= cpu)
+				continue;
+			printk(KERN_WARNING "LOCALITY CPU %d to %d: %d\n", cpu, other_cpu, rq->cpu_locality[other_cpu]);
+		}
+	}
 }
 #else
 void __init sched_init_smp(void)
@@ -6862,16 +6864,10 @@ void __init sched_init(void)
 
 		rq = cpu_rq(i);
 #ifdef CONFIG_SCHED_SMT
-		cpumask_clear(&rq->smt_siblings);
-		cpumask_set_cpu(i, &rq->smt_siblings);
 		rq->siblings_idle = sole_cpu_idle;
-		cpumask_set_cpu(i, &rq->smt_siblings);
 #endif
 #ifdef CONFIG_SCHED_MC
-		cpumask_clear(&rq->cache_siblings);
-		cpumask_set_cpu(i, &rq->cache_siblings);
 		rq->cache_idle = sole_cpu_idle;
-		cpumask_set_cpu(i, &rq->cache_siblings);
 #endif
 		rq->cpu_locality = kmalloc(nr_cpu_ids * sizeof(int *), GFP_ATOMIC);
 		for_each_possible_cpu(j) {
