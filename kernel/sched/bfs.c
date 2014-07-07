@@ -693,6 +693,29 @@ static bool suitable_idle_cpus(struct task_struct *p)
 	return (cpus_intersects(p->cpus_allowed, grq.cpu_idle_map));
 }
 
+#ifdef CONFIG_SCHED_SMT
+static inline const cpumask_t *thread_cpumask(int cpu)
+{
+        return topology_thread_cpumask(cpu);
+}
+/* All this CPU's SMT siblings are idle */
+static inline bool siblings_cpu_idle(int cpu)
+{
+        return cpumask_subset(thread_cpumask(cpu), &grq.cpu_idle_map);
+}
+#endif
+#ifdef CONFIG_SCHED_MC
+static inline const cpumask_t *core_cpumask(int cpu)
+{
+        return topology_core_cpumask(cpu);
+}
+/* All this CPU's shared cache siblings are idle */
+static inline bool cache_cpu_idle(int cpu)
+{
+        return cpumask_subset(core_cpumask(cpu), &grq.cpu_idle_map);
+}
+#endif
+
 #define CPUIDLE_DIFF_THREAD	(1)
 #define CPUIDLE_DIFF_CORE	(2)
 #define CPUIDLE_CACHE_BUSY	(4)
@@ -722,6 +745,31 @@ static inline bool scaling_rq(struct rq *rq);
 static void
 resched_best_mask(int best_cpu, struct rq *rq, cpumask_t *tmpmask)
 {
+	static const int locality2ranking[] = {
+		/*locality 0*/
+		0,
+		/*locality 1*/
+#ifdef CONFIG_SCHED_SMT
+		CPUIDLE_DIFF_THREAD,
+#else
+		0,
+#endif
+		/*locality 2*/
+#ifdef CONFIG_SCHED_MC
+		CPUIDLE_DIFF_CORE,
+#else
+		0,
+#endif
+		/*locality 3*/
+		CPUIDLE_DIFF_CPU,
+		/*locality 4*/
+#ifdef CONFIG_NUMA
+		CPUIDLE_DIFF_NODE,
+#else
+		0,
+#endif
+	};
+
 	int best_ranking = CPUIDLE_DIFF_NODE | CPUIDLE_THROTTLED |
 		CPUIDLE_THREAD_BUSY | CPUIDLE_DIFF_CPU | CPUIDLE_CACHE_BUSY |
 		CPUIDLE_DIFF_CORE | CPUIDLE_DIFF_THREAD;
@@ -738,23 +786,13 @@ resched_best_mask(int best_cpu, struct rq *rq, cpumask_t *tmpmask)
 		tmp_rq = cpu_rq(cpu_tmp);
 
 		locality = rq->cpu_locality[cpu_tmp];
-#ifdef CONFIG_NUMA
-		if (locality > 3)
-			ranking |= CPUIDLE_DIFF_NODE;
-		else
-#endif
-		if (locality > 2)
-			ranking |= CPUIDLE_DIFF_CPU;
+		ranking = locality2ranking[locality];
 #ifdef CONFIG_SCHED_MC
-		else if (locality == 2)
-			ranking |= CPUIDLE_DIFF_CORE;
-		if (!(tmp_rq->cache_idle(cpu_tmp)))
+		if (!cache_cpu_idle(cpu_tmp))
 			ranking |= CPUIDLE_CACHE_BUSY;
 #endif
 #ifdef CONFIG_SCHED_SMT
-		if (locality == 1)
-			ranking |= CPUIDLE_DIFF_THREAD;
-		if (!(tmp_rq->siblings_idle(cpu_tmp)))
+		if (!siblings_cpu_idle(cpu_tmp))
 			ranking |= CPUIDLE_THREAD_BUSY;
 #endif
 		if (scaling_rq(tmp_rq))
@@ -1156,13 +1194,11 @@ unsigned long wait_task_inactive(struct task_struct *p, long match_state)
 		 * work out! In the unlikely event rq is dereferenced
 		 * since we're lockless, grab it again.
 		 */
+		rq = task_rq(p);
 #ifdef CONFIG_SMP
-retry_rq:
-		rq = task_rq(p);
+		WARN_ON_ONCE(!rq);
 		if (unlikely(!rq))
-			goto retry_rq;
-#else /* CONFIG_SMP */
-		rq = task_rq(p);
+			continue;
 #endif
 		/*
 		 * If the task is actively running on another CPU
@@ -1425,6 +1461,14 @@ static inline void ttwu_activate(struct task_struct *p, struct rq *rq,
 	activate_task(p, rq);
 
 	/*
+	 * if a worker is waking up, notify workqueue. Note that on BFS, we
+	 * don't really know what cpu it will be, so we fake it for
+	 * wq_worker_waking_up :/
+	 */
+	if (p->flags & PF_WQ_WORKER)
+		wq_worker_waking_up(p, cpu_of(rq));
+
+	/*
 	 * Sync wakeups (i.e. those types of wakeups where the waker
 	 * has indicated that it will leave the CPU in short order)
 	 * don't trigger a preemption if there are no idle cpus,
@@ -1434,77 +1478,15 @@ static inline void ttwu_activate(struct task_struct *p, struct rq *rq,
 		try_preempt(p, rq);
 }
 
-static inline void ttwu_post_activation(struct task_struct *p, struct rq *rq,
-					bool success)
+/*
+ * Mark the task runnable and perform wakeup-preemption.
+ */
+static inline void
+ttwu_do_wakeup(struct rq *rq, struct task_struct *p, int wake_flags)
 {
-	trace_sched_wakeup(p, success);
+	trace_sched_wakeup(p, true);
 	p->state = TASK_RUNNING;
-
-	/*
-	 * if a worker is waking up, notify workqueue. Note that on BFS, we
-	 * don't really know what cpu it will be, so we fake it for
-	 * wq_worker_waking_up :/
-	 */
-	if ((p->flags & PF_WQ_WORKER) && success)
-		wq_worker_waking_up(p, cpu_of(rq));
 }
-
-#ifdef CONFIG_SMP
-static void
-ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags)
-{
-	ttwu_activate(p, rq, false);
-	ttwu_post_activation(p, rq, true);
-}
-
-static void sched_ttwu_pending(void)
-{
-	struct rq *rq = this_rq();
-	struct llist_node *llist = llist_del_all(&rq->wake_list);
-	struct task_struct *p;
-
-	grq_lock();
-
-	while (llist) {
-		p = llist_entry(llist, struct task_struct, wake_entry);
-		llist = llist_next(llist);
-		ttwu_do_activate(rq, p, 0);
-	}
-
-	grq_unlock();
-}
-
-void scheduler_ipi(void)
-{
-	/*
-	 * Fold TIF_NEED_RESCHED into the preempt_count; anybody setting
-	 * TIF_NEED_RESCHED remotely (for the first time) will also send
-	 * this IPI.
-	 */
-	preempt_fold_need_resched();
-
-	if (llist_empty(&this_rq()->wake_list))
-		return;
-
-	/*
-	 * Not all reschedule IPI handlers call irq_enter/irq_exit, since
-	 * traditionally all their work was done from the interrupt return
-	 * path. Now that we actually do some work, we need to make sure
-	 * we do call them.
-	 *
-	 * Some archs already do call them, luckily irq_enter/exit nest
-	 * properly.
-	 *
-	 * Arguably we should visit all archs and update all handlers,
-	 * however a fair share of IPIs are still resched only so this would
-	 * somewhat pessimize the simple resched case.
-	 */
-	irq_enter();
-	sched_ttwu_pending();
-
-	irq_exit();
-}
-#endif /* CONFIG_SMP */
 
 /*
  * wake flags
@@ -1531,10 +1513,9 @@ void scheduler_ipi(void)
 static bool try_to_wake_up(struct task_struct *p, unsigned int state,
 			  int wake_flags)
 {
-	bool success = false;
 	unsigned long flags;
 	struct rq *rq;
-	int cpu;
+	int cpu, success = 0;
 
 	get_cpu();
 
@@ -1554,21 +1535,17 @@ static bool try_to_wake_up(struct task_struct *p, unsigned int state,
 	cpu = task_cpu(p);
 
 	/* state is a volatile long, どうして、分からない */
-	if (!((unsigned int)p->state & state))
-		goto out_unlock;
+	if (!(p->state & state))
+		goto out;
 
-	if (task_queued(p) || task_running(p))
-		goto out_running;
+	success = 1;
+	if (!task_queued(p) && !task_running(p))
+		ttwu_activate(p, rq, wake_flags & WF_SYNC);
 
-	ttwu_activate(p, rq, wake_flags & WF_SYNC);
-	success = true;
-
-out_running:
-	ttwu_post_activation(p, rq, success);
-out_unlock:
-	task_grq_unlock(&flags);
-
+	ttwu_do_wakeup(rq, p, 0);
 	ttwu_stat(p, cpu, wake_flags);
+out:
+	task_grq_unlock(&flags);
 
 	put_cpu();
 
@@ -1586,7 +1563,6 @@ out_unlock:
 static void try_to_wake_up_local(struct task_struct *p)
 {
 	struct rq *rq = task_rq(p);
-	bool success = false;
 
 	lockdep_assert_held(&grq.lock);
 
@@ -1594,15 +1570,10 @@ static void try_to_wake_up_local(struct task_struct *p)
 		return;
 
 	if (!task_queued(p)) {
-		if (likely(!task_running(p))) {
-			schedstat_inc(rq, ttwu_count);
-			schedstat_inc(rq, ttwu_local);
-		}
 		ttwu_activate(p, rq, false);
-		ttwu_stat(p, smp_processor_id(), 0);
-		success = true;
 	}
-	ttwu_post_activation(p, rq, success);
+	ttwu_do_wakeup(rq, p, 0);
+	ttwu_stat(p, smp_processor_id(), 0);
 }
 
 /**
@@ -3735,12 +3706,6 @@ out:
  */
 int idle_cpu(int cpu)
 {
-#ifdef CONFIG_SMP
-	struct rq *rq = cpu_rq(cpu);
-
-	if (!llist_empty(&rq->wake_list))
-		return 0;
-#endif
 	return cpu_curr(cpu) == cpu_rq(cpu)->idle;
 }
 
@@ -5457,7 +5422,6 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		break;
 
 	case CPU_DYING:
-		sched_ttwu_pending();
 		/* Update our root-domain */
 		grq_lock_irqsave(&flags);
 		if (rq->rd) {
@@ -6667,39 +6631,6 @@ static int cpuset_cpu_inactive(struct notifier_block *nfb, unsigned long action,
 	return NOTIFY_OK;
 }
 
-#if defined(CONFIG_SCHED_SMT) || defined(CONFIG_SCHED_MC)
-/*
- * Cheaper version of the below functions in case support for SMT and MC is
- * compiled in but CPUs have no siblings.
- */
-static bool sole_cpu_idle(int cpu)
-{
-	return rq_idle(cpu_rq(cpu));
-}
-#endif
-#ifdef CONFIG_SCHED_SMT
-static const cpumask_t *thread_cpumask(int cpu)
-{
-	return topology_thread_cpumask(cpu);
-}
-/* All this CPU's SMT siblings are idle */
-static bool siblings_cpu_idle(int cpu)
-{
-	return cpumask_subset(thread_cpumask(cpu), &grq.cpu_idle_map);
-}
-#endif
-#ifdef CONFIG_SCHED_MC
-static const cpumask_t *core_cpumask(int cpu)
-{
-	return topology_core_cpumask(cpu);
-}
-/* All this CPU's shared cache siblings are idle */
-static bool cache_cpu_idle(int cpu)
-{
-	return cpumask_subset(core_cpumask(cpu), &grq.cpu_idle_map);
-}
-#endif
-
 enum sched_domain_level {
 	SD_LV_NONE = 0,
 	SD_LV_SIBLING,
@@ -6766,24 +6697,15 @@ void __init sched_init_smp(void)
 					rq->cpu_locality[other_cpu] = 3;
 			}
 		}
-
-		/*
-		 * Each runqueue has its own function in case it doesn't have
-		 * siblings of its own allowing mixed topologies.
-		 */
 #ifdef CONFIG_SCHED_MC
 		for_each_cpu_mask(other_cpu, *core_cpumask(cpu)) {
 			if (rq->cpu_locality[other_cpu] > 2)
 				rq->cpu_locality[other_cpu] = 2;
 		}
-		if (cpus_weight(*core_cpumask(cpu)) > 1)
-			rq->cache_idle = cache_cpu_idle;
 #endif
 #ifdef CONFIG_SCHED_SMT
 		for_each_cpu_mask(other_cpu, *thread_cpumask(cpu))
 			rq->cpu_locality[other_cpu] = 1;
-		if (cpus_weight(*thread_cpumask(cpu)) > 1)
-			rq->siblings_idle = siblings_cpu_idle;
 #endif
 	}
 	grq_unlock_irq();
@@ -6864,13 +6786,6 @@ void __init sched_init(void)
 		int j;
 
 		rq = cpu_rq(i);
-#ifdef CONFIG_SCHED_SMT
-		rq->siblings_idle = sole_cpu_idle;
-#endif
-#ifdef CONFIG_SCHED_MC
-		rq->cache_idle = sole_cpu_idle;
-#endif
-		rq->cpu_locality = kmalloc(nr_cpu_ids * sizeof(int *), GFP_ATOMIC);
 		for_each_possible_cpu(j) {
 			if (i == j)
 				rq->cpu_locality[j] = 0;

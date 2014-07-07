@@ -33,15 +33,7 @@ struct rq {
 
 	struct root_domain *rd;
 	struct sched_domain *sd;
-	int *cpu_locality; /* CPU relative cache distance */
-#ifdef CONFIG_SCHED_SMT
-	bool (*siblings_idle)(int cpu);
-	/* See if all smt siblings are idle */
-#endif /* CONFIG_SCHED_SMT */
-#ifdef CONFIG_SCHED_MC
-	bool (*cache_idle)(int cpu);
-	/* See if all cache siblings are idle */
-#endif /* CONFIG_SCHED_MC */
+	int cpu_locality[NR_CPUS]; /* CPU relative cache distance */
 	u64 last_niffy; /* Last time this RQ updated grq.niffies */
 #endif /* CONFIG_SMP */
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
@@ -77,10 +69,6 @@ struct rq {
 	unsigned int ttwu_count;
 	unsigned int ttwu_local;
 #endif /* CONFIG_SCHEDSTATS */
-
-#ifdef CONFIG_SMP
-	struct llist_head wake_list;
-#endif
 };
 
 #ifdef CONFIG_SMP
