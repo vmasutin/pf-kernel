@@ -1204,6 +1204,9 @@ struct task_struct {
 	struct list_head run_list;
 	u64 last_ran;
 	u64 sched_time; /* sched_clock time spent running */
+#ifdef CONFIG_SMT_NICE
+	int smt_bias; /* Policy/nice level bias across smt siblings */
+#endif
 #ifdef CONFIG_SMP
 	bool sticky; /* Soft affined flag */
 #endif
@@ -2462,7 +2465,7 @@ extern char *get_task_comm(char *to, struct task_struct *tsk);
 
 #ifdef CONFIG_SMP
 #ifdef CONFIG_SCHED_BFS
-/* scheduler_ipi() simplely do nothing in BFS */
+/* scheduler_ipi does nothing on BFS */
 static inline void scheduler_ipi(void) { }
 #else
 void scheduler_ipi(void);
