@@ -18,7 +18,9 @@ struct rq {
 	u64 rq_last_ran;
 	int rq_prio;
 	bool rq_running; /* There is a task running */
-
+#ifdef CONFIG_SMT_NICE
+	int rq_smt_bias; /* Policy/nice level bias across smt siblings */
+#endif
 	/* Accurate timekeeping data */
 	u64 timekeep_clock;
 	unsigned long user_pc, nice_pc, irq_pc, softirq_pc, system_pc,
@@ -33,7 +35,15 @@ struct rq {
 
 	struct root_domain *rd;
 	struct sched_domain *sd;
-	int cpu_locality[NR_CPUS]; /* CPU relative cache distance */
+	int *cpu_locality; /* CPU relative cache distance */
+#ifdef CONFIG_SCHED_SMT
+	bool (*siblings_idle)(int cpu);
+	/* See if all smt siblings are idle */
+#endif /* CONFIG_SCHED_SMT */
+#ifdef CONFIG_SCHED_MC
+	bool (*cache_idle)(int cpu);
+	/* See if all cache siblings are idle */
+#endif /* CONFIG_SCHED_MC */
 	u64 last_niffy; /* Last time this RQ updated grq.niffies */
 #endif /* CONFIG_SMP */
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
