@@ -3035,7 +3035,9 @@ static void time_slice_expired(struct task_struct *p)
 	p->time_slice = timeslice();
 	p->deadline = grq.niffies + task_deadline_diff(p);
 #ifdef CONFIG_SMT_NICE
-	if (rt_task(p))
+	if (!p->mm)
+		p->smt_bias = 0;
+	else if (rt_task(p))
 		p->smt_bias = 1 << 30;
 	else if (task_running_iso(p))
 		p->smt_bias = 1 << 29;
