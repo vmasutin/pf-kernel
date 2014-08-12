@@ -3297,6 +3297,10 @@ static void check_smt_siblings(int cpu)
 		if (other_cpu == cpu)
 			continue;
 		rq = cpu_rq(other_cpu);
+		if (rq_idle(rq))
+			continue;
+		if (!rq->online)
+			continue;
 		p = rq->curr;
 		if (smt_should_schedule(p, cpu)) {
 			set_tsk_need_resched(p);
