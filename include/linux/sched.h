@@ -1003,10 +1003,8 @@ typedef int (*sched_domain_flags_f)(void);
 
 struct sd_data {
 	struct sched_domain **__percpu sd;
-#ifndef CONFIG_SCHED_BFS
 	struct sched_group **__percpu sg;
 	struct sched_group_capacity **__percpu sgc;
-#endif
 };
 
 struct sched_domain_topology_level {
@@ -1228,10 +1226,8 @@ struct task_struct {
 	unsigned int flags;	/* per process flags, defined below */
 	unsigned int ptrace;
 
-#if defined(CONFIG_SMP) && !defined(CONFIG_SCHED_BFS)
-	struct llist_node wake_entry;
-#endif
 #if defined(CONFIG_SMP) || defined(CONFIG_SCHED_BFS)
+	struct llist_node wake_entry;
 	int on_cpu;
 #endif
 #ifdef CONFIG_SMP
@@ -1253,6 +1249,9 @@ struct task_struct {
 	struct list_head run_list;
 	u64 last_ran;
 	u64 sched_time; /* sched_clock time spent running */
+#ifdef CONFIG_SMT_NICE
+	int smt_bias; /* Policy/nice level bias across smt siblings */
+#endif
 #ifdef CONFIG_SMP
 	bool sticky; /* Soft affined flag */
 #endif
