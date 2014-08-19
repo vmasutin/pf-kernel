@@ -5195,7 +5195,7 @@ out:
 	task_grq_unlock(&flags);
 
 	if (running_wrong)
-		_cond_resched();
+		__cond_resched();
 
 	return ret;
 }
