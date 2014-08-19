@@ -658,7 +658,7 @@ static void run_ksoftirqd(unsigned int cpu)
 		__do_softirq();
 		rcu_note_context_switch(cpu);
 		local_irq_enable();
-		cond_resched();
+		schedule();
 		return;
 	}
 	local_irq_enable();
