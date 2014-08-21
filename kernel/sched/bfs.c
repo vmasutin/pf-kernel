@@ -1505,6 +1505,18 @@ ttwu_stat(struct task_struct *p, int cpu, int wake_flags)
 #endif /* CONFIG_SCHEDSTATS */
 }
 
+#ifdef CONFIG_SMP
+void scheduler_ipi(void)
+{
+	/*
+	 * Fold TIF_NEED_RESCHED into the preempt_count; anybody setting
+	 * TIF_NEED_RESCHED remotely (for the first time) will also send
+	 * this IPI.
+	 */
+	preempt_fold_need_resched();
+}
+#endif
+
 static inline void ttwu_activate(struct task_struct *p, struct rq *rq,
 				 bool is_sync)
 {
