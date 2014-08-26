@@ -150,7 +150,7 @@ EXPORT_SYMBOL(__smp_mb__after_atomic);
 
 void print_scheduler_version(void)
 {
-	printk(KERN_INFO "BFS CPU scheduler v0.450 by Con Kolivas.\n");
+	printk(KERN_INFO "BFS CPU scheduler v0.456 by Con Kolivas.\n");
 }
 
 /*
