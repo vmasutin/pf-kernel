@@ -1,8 +1,8 @@
 VERSION = 3
 PATCHLEVEL = 17
 SUBLEVEL = 0
-EXTRAVERSION =
-NAME = Shuffling Zombie Juror
+EXTRAVERSION = -pf0
+NAME = Live Long And Prosper
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
