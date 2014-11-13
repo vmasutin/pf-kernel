@@ -18,6 +18,7 @@ struct rq {
 	u64 rq_last_ran;
 	int rq_prio;
 	bool rq_running; /* There is a task running */
+	int soft_affined; /* Running or queued tasks with this set as their rq */
 #ifdef CONFIG_SMT_NICE
 	int rq_smt_bias; /* Policy/nice level bias across smt siblings */
 #endif
@@ -82,13 +83,11 @@ struct rq {
 };
 
 #ifdef CONFIG_SMP
-DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
-#define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
-#define this_rq()		(&__get_cpu_var(runqueues))
-#define task_rq(p)		cpu_rq(task_cpu(p))
-#define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
-#else
-extern struct rq *uprq;
+struct rq *cpu_rq(int cpu);
+#endif
+
+#ifndef CONFIG_SMP
+static struct rq *uprq;
 #define cpu_rq(cpu)	(uprq)
 #define this_rq()	(uprq)
 #define task_rq(p)	(uprq)
