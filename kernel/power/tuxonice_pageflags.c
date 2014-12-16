@@ -16,6 +16,14 @@
 
 int toi_pageflags_space_needed(void)
 {
-	return toi_memory_bm_space_needed(pageset1_map);
+	int total = 0;
+	struct bm_block *bb;
+
+	total = sizeof(unsigned int);
+
+	list_for_each_entry(bb, &pageset1_map->blocks, hook)
+		total += 2 * sizeof(unsigned long) + PAGE_SIZE;
+
+	return total;
 }
 EXPORT_SYMBOL_GPL(toi_pageflags_space_needed);

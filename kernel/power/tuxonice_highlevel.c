@@ -255,6 +255,27 @@ static void mark_nosave_pages(void)
 	}
 }
 
+static int toi_alloc_bitmap(struct memory_bitmap **bm)
+{
+	int result = 0;
+
+	*bm = kzalloc(sizeof(struct memory_bitmap), GFP_KERNEL);
+	if (!*bm) {
+		printk(KERN_ERR "Failed to kzalloc memory for a bitmap.\n");
+		return -ENOMEM;
+	}
+
+	result = memory_bm_create(*bm, GFP_KERNEL, 0);
+
+	if (result) {
+		printk(KERN_ERR "Failed to create a bitmap.\n");
+		kfree(*bm);
+		*bm = NULL;
+	}
+
+	return result;
+}
+
 /**
  * allocate_bitmaps - allocate bitmaps used to record page states
  *
@@ -274,6 +295,16 @@ static int allocate_bitmaps(void)
 		return 1;
 
 	return 0;
+}
+
+static void toi_free_bitmap(struct memory_bitmap **bm)
+{
+	if (!*bm)
+		return;
+
+	memory_bm_free(*bm, 0);
+	kfree(*bm);
+	*bm = NULL;
 }
 
 /**
@@ -738,12 +769,12 @@ static void map_ps2_pages(int enable)
 {
 	unsigned long pfn = 0;
 
-	pfn = toi_memory_bm_next_pfn(pageset2_map);
+	pfn = memory_bm_next_pfn(pageset2_map);
 
-	while (pfn) {
+	while (pfn != BM_END_OF_MAP) {
 		struct page *page = pfn_to_page(pfn);
 		kernel_map_pages(page, 1, enable);
-		pfn = toi_memory_bm_next_pfn(pageset2_map);
+		pfn = memory_bm_next_pfn(pageset2_map);
 	}
 }
 
@@ -890,7 +921,7 @@ static int do_load_atomic_copy(void)
  **/
 static void prepare_restore_load_alt_image(int prepare)
 {
-	static struct toi_memory_bitmap *pageset1_map_save, *pageset1_copy_map_save;
+	static struct memory_bitmap *pageset1_map_save, *pageset1_copy_map_save;
 
 	if (prepare) {
 		pageset1_map_save = pageset1_map;
@@ -900,9 +931,9 @@ static void prepare_restore_load_alt_image(int prepare)
 		set_toi_state(TOI_LOADING_ALT_IMAGE);
 		toi_reset_alt_image_pageset2_pfn();
 	} else {
-		toi_memory_bm_free(pageset1_map, 0);
+		memory_bm_free(pageset1_map, 0);
 		pageset1_map = pageset1_map_save;
-		toi_memory_bm_free(pageset1_copy_map, 0);
+		memory_bm_free(pageset1_copy_map, 0);
 		pageset1_copy_map = pageset1_copy_map_save;
 		clear_toi_state(TOI_NOW_RESUMING);
 		clear_toi_state(TOI_LOADING_ALT_IMAGE);
@@ -1264,12 +1295,6 @@ static __init int core_load(void)
 
 	printk(KERN_INFO "TuxOnIce " TOI_CORE_VERSION
 			" (http://tuxonice.net)\n");
-
-        if (!hibernation_available()) {
-          printk(KERN_INFO "TuxOnIce disabled due to request for hibernation"
-              " to be disabled in this kernel.\n");
-          return 1;
-        }
 
 	if (toi_sysfs_init())
 		return 1;

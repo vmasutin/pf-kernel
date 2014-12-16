@@ -224,5 +224,4 @@ extern char tuxonice_signature[9];
 
 extern int toi_start_other_threads(void);
 extern void toi_stop_other_threads(void);
-
 #endif

@@ -279,10 +279,10 @@ static inline void suspend_thaw_processes(void)
 
 extern struct page *saveable_page(struct zone *z, unsigned long p);
 #ifdef CONFIG_HIGHMEM
-extern void *saveable_highmem_page(struct zone *z, unsigned long p);
+extern struct page *saveable_highmem_page(struct zone *z, unsigned long p);
 #else
 static
-inline void *saveable_highmem_page(struct zone *z, unsigned long p)
+inline struct page *saveable_highmem_page(struct zone *z, unsigned long p)
 {
 	return NULL;
 }
@@ -301,6 +301,65 @@ struct nosave_region {
 	unsigned long start_pfn;
 	unsigned long end_pfn;
 };
+
+#define BM_END_OF_MAP	(~0UL)
+
+#define BM_BITS_PER_BLOCK	(PAGE_SIZE * BITS_PER_BYTE)
+
+struct bm_block {
+	struct list_head hook;		/* hook into a list of bitmap blocks */
+	unsigned long start_pfn;	/* pfn represented by the first bit */
+	unsigned long end_pfn;	/* pfn represented by the last bit plus 1 */
+	unsigned long *data;	/* bitmap representing pages */
+};
+
+/* struct bm_position is used for browsing memory bitmaps */
+
+struct bm_position {
+	struct bm_block *block;
+	int bit;
+};
+
+struct memory_bitmap {
+	struct list_head blocks;	/* list of bitmap blocks */
+	struct linked_page *p_list;	/* list of pages used to store zone
+					 * bitmap objects and bitmap block
+					 * objects
+					 */
+	struct bm_position *states;	/* most recently used bit position */
+	int num_states;			/* when iterating over a bitmap and
+					 * number of states we support.
+					 */
+};
+
+extern int memory_bm_create(struct memory_bitmap *bm, gfp_t gfp_mask,
+		int safe_needed);
+extern int memory_bm_create_index(struct memory_bitmap *bm, gfp_t gfp_mask,
+		int safe_needed, int index);
+extern void memory_bm_free(struct memory_bitmap *bm, int clear_nosave_free);
+extern void memory_bm_set_bit(struct memory_bitmap *bm, unsigned long pfn);
+extern void memory_bm_clear_bit(struct memory_bitmap *bm, unsigned long pfn);
+extern void memory_bm_clear_bit_index(struct memory_bitmap *bm, unsigned long pfn, int index);
+extern int memory_bm_test_bit(struct memory_bitmap *bm, unsigned long pfn);
+extern int memory_bm_test_bit_index(struct memory_bitmap *bm, unsigned long pfn, int index);
+extern unsigned long memory_bm_next_pfn(struct memory_bitmap *bm);
+extern unsigned long memory_bm_next_pfn_index(struct memory_bitmap *bm,
+		int index);
+extern void memory_bm_position_reset(struct memory_bitmap *bm);
+extern void memory_bm_clear(struct memory_bitmap *bm);
+extern void memory_bm_copy(struct memory_bitmap *source,
+		struct memory_bitmap *dest);
+extern void memory_bm_dup(struct memory_bitmap *source,
+		struct memory_bitmap *dest);
+extern int memory_bm_set_iterators(struct memory_bitmap *bm, int number);
+
+#ifdef CONFIG_TOI
+struct toi_module_ops;
+extern int memory_bm_read(struct memory_bitmap *bm, int (*rw_chunk)
+	(int rw, struct toi_module_ops *owner, char *buffer, int buffer_size));
+extern int memory_bm_write(struct memory_bitmap *bm, int (*rw_chunk)
+	(int rw, struct toi_module_ops *owner, char *buffer, int buffer_size));
+#endif
 
 #ifdef CONFIG_PM_AUTOSLEEP
 
