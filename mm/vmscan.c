@@ -2422,6 +2422,7 @@ static bool shrink_zones(struct zonelist *zonelist, struct scan_control *sc)
 			 * page allocations.
 			 */
 			if (IS_ENABLED(CONFIG_COMPACTION) &&
+			    !sc->hibernation_mode &&
 			    sc->order > PAGE_ALLOC_COSTLY_ORDER &&
 			    zonelist_zone_idx(z) <= requested_highidx &&
 			    compaction_ready(zone, sc->order)) {
@@ -3424,8 +3425,8 @@ unsigned long shrink_memory_mask(unsigned long nr_to_reclaim, gfp_t mask)
 	struct reclaim_state reclaim_state;
 	struct scan_control sc = {
 		.nr_to_reclaim = nr_to_reclaim,
-		.gfp_mask = GFP_HIGHUSER_MOVABLE,
 		.priority = DEF_PRIORITY,
+		.gfp_mask = mask,
 		.may_writepage = 1,
 		.may_unmap = 1,
 		.may_swap = 1,
