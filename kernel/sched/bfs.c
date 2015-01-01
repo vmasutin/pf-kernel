@@ -3348,7 +3348,7 @@ static void wake_smt_siblings(int __maybe_unused cpu) {}
  *          - return from syscall or exception to user-space
  *          - return from interrupt-handler to user-space
  */
-static void __sched __schedule(void)
+asmlinkage __visible void __sched schedule(void)
 {
 	struct task_struct *prev, *next, *idle;
 	unsigned long *switch_count;
@@ -3402,6 +3402,17 @@ need_resched:
 			}
 		}
 		switch_count = &prev->nvcsw;
+	}
+
+	/*
+	 * If we are going to sleep and we have plugged IO queued, make
+	 * sure to submit it to avoid deadlocks.
+	 */
+	if (unlikely(deactivate && blk_needs_flush_plug(prev))) {
+		grq_unlock_irq();
+		preempt_enable_no_resched();
+		blk_schedule_flush_plug(prev);
+		goto need_resched;
 	}
 
 	update_clocks(rq);
@@ -3503,25 +3514,6 @@ rerun_prev_unlocked:
 		goto need_resched;
 }
 
-static inline void sched_submit_work(struct task_struct *tsk)
-{
-	if (!tsk->state || tsk_is_pi_blocked(tsk))
-		return;
-	/*
-	 * If we are going to sleep and we have plugged IO queued,
-	 * make sure to submit it to avoid deadlocks.
-	 */
-	if (blk_needs_flush_plug(tsk))
-		blk_schedule_flush_plug(tsk);
-}
-
-asmlinkage __visible void __sched schedule(void)
-{
-	struct task_struct *tsk = current;
-
-	sched_submit_work(tsk);
-	__schedule();
-}
 EXPORT_SYMBOL(schedule);
 
 #ifdef CONFIG_CONTEXT_TRACKING
