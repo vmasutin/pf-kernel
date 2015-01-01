@@ -793,6 +793,8 @@ static bool smt_should_schedule(struct task_struct *p, int cpu)
 		return true;
 	if (rt_task(p))
 		return true;
+	if (!idleprio_suitable(p))
+		return true;
 	best_bias = best_smt_bias(cpu);
 	/* The smt siblings are all idle or running IDLEPRIO */
 	if (best_bias < 1)
