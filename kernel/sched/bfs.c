@@ -139,7 +139,7 @@
 
 void print_scheduler_version(void)
 {
-	printk(KERN_INFO "BFS CPU scheduler v0.447 by Con Kolivas.\n");
+	printk(KERN_INFO "BFS CPU scheduler v0.454 by Con Kolivas.\n");
 }
 
 /*
@@ -316,6 +316,11 @@ static inline void update_clocks(struct rq *rq)
 	rq->last_niffy = grq.niffies;
 }
 #else /* CONFIG_SMP */
+static struct rq *uprq;
+#define cpu_rq(cpu)	(uprq)
+#define this_rq()	(uprq)
+#define task_rq(p)	(uprq)
+#define cpu_curr(cpu)	((uprq)->curr)
 static inline int cpu_of(struct rq *rq)
 {
 	return 0;
@@ -1139,6 +1144,13 @@ struct migration_req {
 	int dest_cpu;
 };
 
+/* Enter with grq lock held. We know p is on the local cpu */
+static inline void __set_tsk_resched(struct task_struct *p)
+{
+	set_tsk_need_resched(p);
+	set_preempt_need_resched();
+}
+
 /*
  * wait_task_inactive - wait for a thread to unschedule.
  *
@@ -1464,30 +1476,6 @@ static inline void ttwu_post_activation(struct task_struct *p, struct rq *rq,
 }
 
 #ifdef CONFIG_SMP
-static void
-ttwu_do_activate(struct rq *rq, struct task_struct *p, int wake_flags)
-{
-	ttwu_activate(p, rq, false);
-	ttwu_post_activation(p, rq, true);
-}
-
-static void sched_ttwu_pending(void)
-{
-	struct rq *rq = this_rq();
-	struct llist_node *llist = llist_del_all(&rq->wake_list);
-	struct task_struct *p;
-
-	grq_lock();
-
-	while (llist) {
-		p = llist_entry(llist, struct task_struct, wake_entry);
-		llist = llist_next(llist);
-		ttwu_do_activate(rq, p, 0);
-	}
-
-	grq_unlock();
-}
-
 void scheduler_ipi(void)
 {
 	/*
@@ -1496,27 +1484,6 @@ void scheduler_ipi(void)
 	 * this IPI.
 	 */
 	preempt_fold_need_resched();
-
-	if (llist_empty(&this_rq()->wake_list))
-		return;
-
-	/*
-	 * Not all reschedule IPI handlers call irq_enter/irq_exit, since
-	 * traditionally all their work was done from the interrupt return
-	 * path. Now that we actually do some work, we need to make sure
-	 * we do call them.
-	 *
-	 * Some archs already do call them, luckily irq_enter/exit nest
-	 * properly.
-	 *
-	 * Arguably we should visit all archs and update all handlers,
-	 * however a fair share of IPIs are still resched only so this would
-	 * somewhat pessimize the simple resched case.
-	 */
-	irq_enter();
-	sched_ttwu_pending();
-
-	irq_exit();
 }
 #endif /* CONFIG_SMP */
 
@@ -1761,7 +1728,7 @@ after_ts_init:
 			 * do child-runs-first in anticipation of an exec. This
 			 * usually avoids a lot of COW overhead.
 			 */
-			set_tsk_need_resched(parent);
+			__set_tsk_resched(parent);
 		} else
 			try_preempt(p, rq);
 	} else {
@@ -1773,7 +1740,7 @@ after_ts_init:
 		 	* be slightly earlier.
 		 	*/
 			rq->rq_time_slice = 0;
-			set_tsk_need_resched(parent);
+			__set_tsk_resched(parent);
 		}
 		time_slice_expired(p);
 	}
@@ -2896,9 +2863,10 @@ static void task_running_tick(struct rq *rq)
 
 	/* p->time_slice < RESCHED_US. We only modify task_struct under grq lock */
 	p = rq->curr;
+
 	grq_lock();
 	requeue_task(p);
-	set_tsk_need_resched(p);
+	__set_tsk_resched(p);
 	grq_unlock();
 }
 
@@ -3792,12 +3760,6 @@ EXPORT_SYMBOL_GPL(task_nice);
  */
 int idle_cpu(int cpu)
 {
-#ifdef CONFIG_SMP
-	struct rq *rq = cpu_rq(cpu);
-
-	if (!llist_empty(&rq->wake_list))
-		return 0;
-#endif
 	return cpu_curr(cpu) == cpu_rq(cpu)->idle;
 }
 
@@ -4692,9 +4654,9 @@ EXPORT_SYMBOL(yield);
  */
 bool __sched yield_to(struct task_struct *p, bool preempt)
 {
+	struct rq *rq, *p_rq;
 	unsigned long flags;
 	int yielded = 0;
-	struct rq *rq;
 
 	rq = this_rq();
 	grq_lock_irqsave(&flags);
@@ -4702,6 +4664,8 @@ bool __sched yield_to(struct task_struct *p, bool preempt)
 		yielded = -ESRCH;
 		goto out_unlock;
 	}
+
+	p_rq = task_rq(p);
 	yielded = 1;
 	if (p->deadline > rq->rq_deadline)
 		p->deadline = rq->rq_deadline;
@@ -4709,7 +4673,8 @@ bool __sched yield_to(struct task_struct *p, bool preempt)
 	rq->rq_time_slice = 0;
 	if (p->time_slice > timeslice())
 		p->time_slice = timeslice();
-	set_tsk_need_resched(rq->curr);
+	if (preempt && rq != rq)
+		resched_task(p_rq->curr);
 out_unlock:
 	grq_unlock_irqrestore(&flags);
 
@@ -5159,7 +5124,7 @@ out:
 	task_grq_unlock(&flags);
 
 	if (running_wrong)
-		_cond_resched();
+		__cond_resched();
 
 	return ret;
 }
@@ -5499,7 +5464,6 @@ migration_call(struct notifier_block *nfb, unsigned long action, void *hcpu)
 		break;
 
 	case CPU_DYING:
-		sched_ttwu_pending();
 		/* Update our root-domain */
 		grq_lock_irqsave(&flags);
 		if (rq->rd) {
