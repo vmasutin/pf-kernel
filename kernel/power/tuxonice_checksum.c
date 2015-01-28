@@ -303,7 +303,7 @@ void check_checksums(void)
 
 	toi_message(TOI_IO, TOI_VERBOSE, 0, "Verifying checksums.");
 	toi_memory_bm_position_reset(pageset2_map);
-	for (pfn = toi_memory_bm_next_pfn(pageset2_map); pfn;
+	for (pfn = toi_memory_bm_next_pfn(pageset2_map); pfn != (~0UL);
 			pfn = toi_memory_bm_next_pfn(pageset2_map)) {
 		int ret;
 		char *pa;
