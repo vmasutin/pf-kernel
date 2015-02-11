@@ -1,5 +1,5 @@
 pkgname=('linux-pf' 'linux-pf-headers')
-pkgver=3.18.0
+pkgver=3.19.0
 pkgrel=0
 _pkgsuffix="-pf$pkgrel"
 pkgdesc="pf-kernel with modules"
