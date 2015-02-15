@@ -1,8 +1,8 @@
 VERSION = 3
 PATCHLEVEL = 18
 SUBLEVEL = 0
-EXTRAVERSION = -pf0
-NAME = Diseased Newt
+EXTRAVERSION = -pf1
+NAME = Damn The Prefixes
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
