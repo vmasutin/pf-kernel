@@ -1,5 +1,5 @@
 KERNEL_VERSION="3.18.0"
-LOCAL_VERSION="-pf0"
+LOCAL_VERSION="-pf1"
 
 post_install () {
   echo ">>> Updating module dependencies..."
