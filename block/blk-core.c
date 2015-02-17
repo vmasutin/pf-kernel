@@ -48,6 +48,9 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(block_unplug);
 
 DEFINE_IDA(blk_queue_ida);
 
+int trap_non_toi_io;
+EXPORT_SYMBOL_GPL(trap_non_toi_io);
+
 /*
  * For the allocated request tables
  */
@@ -524,6 +527,9 @@ void blk_cleanup_queue(struct request_queue *q)
 	/* @q won't process any more request, flush async actions */
 	del_timer_sync(&q->backing_dev_info.laptop_mode_wb_timer);
 	blk_sync_queue(q);
+
+	if (q->mq_ops)
+		blk_mq_free_queue(q);
 
 	spin_lock_irq(lock);
 	if (q->queue_lock != &q->__queue_lock)
@@ -1927,6 +1933,9 @@ EXPORT_SYMBOL(generic_make_request);
 void submit_bio(int rw, struct bio *bio)
 {
 	bio->bi_rw |= rw;
+
+	if (unlikely(trap_non_toi_io))
+		BUG_ON(!(bio->bi_flags & BIO_TOI));
 
 	/*
 	 * If it's a regular read/write or a barrier with data attached,

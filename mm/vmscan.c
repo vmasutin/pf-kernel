@@ -1371,7 +1371,7 @@ static int too_many_isolated(struct zone *zone, int file,
 {
 	unsigned long inactive, isolated;
 
-	if (current_is_kswapd())
+	if (current_is_kswapd() || sc->hibernation_mode)
 		return 0;
 
 	if (!global_reclaim(sc))
@@ -2209,6 +2209,9 @@ static inline bool should_continue_reclaim(struct zone *zone,
 	unsigned long pages_for_compaction;
 	unsigned long inactive_lru_pages;
 
+	if (nr_reclaimed && nr_scanned && sc->nr_to_reclaim >= sc->nr_reclaimed)
+		return true;
+
 	/* If not in reclaim/compaction mode, stop */
 	if (!in_reclaim_compaction(sc))
 		return false;
@@ -2502,6 +2505,11 @@ static unsigned long do_try_to_free_pages(struct zonelist *zonelist,
 	unsigned long total_scanned = 0;
 	unsigned long writeback_threshold;
 	bool zones_reclaimable;
+
+#ifdef CONFIG_FREEZER
+	if (unlikely(pm_freezing && !sc->hibernation_mode))
+		return 0;
+#endif
 
 	delayacct_freepages_start();
 
@@ -2904,18 +2912,20 @@ static bool prepare_kswapd_sleep(pg_data_t *pgdat, int order, long remaining,
 		return false;
 
 	/*
-	 * There is a potential race between when kswapd checks its watermarks
-	 * and a process gets throttled. There is also a potential race if
-	 * processes get throttled, kswapd wakes, a large process exits therby
-	 * balancing the zones that causes kswapd to miss a wakeup. If kswapd
-	 * is going to sleep, no process should be sleeping on pfmemalloc_wait
-	 * so wake them now if necessary. If necessary, processes will wake
-	 * kswapd and get throttled again
+	 * The throttled processes are normally woken up in balance_pgdat() as
+	 * soon as pfmemalloc_watermark_ok() is true. But there is a potential
+	 * race between when kswapd checks the watermarks and a process gets
+	 * throttled. There is also a potential race if processes get
+	 * throttled, kswapd wakes, a large process exits thereby balancing the
+	 * zones, which causes kswapd to exit balance_pgdat() before reaching
+	 * the wake up checks. If kswapd is going to sleep, no process should
+	 * be sleeping on pfmemalloc_wait, so wake them now if necessary. If
+	 * the wake up is premature, processes will wake kswapd and get
+	 * throttled again. The difference from wake ups in balance_pgdat() is
+	 * that here we are under prepare_to_wait().
 	 */
-	if (waitqueue_active(&pgdat->pfmemalloc_wait)) {
-		wake_up(&pgdat->pfmemalloc_wait);
-		return false;
-	}
+	if (waitqueue_active(&pgdat->pfmemalloc_wait))
+		wake_up_all(&pgdat->pfmemalloc_wait);
 
 	return pgdat_balanced(pgdat, order, classzone_idx);
 }
@@ -3388,6 +3398,11 @@ void wakeup_kswapd(struct zone *zone, int order, enum zone_type classzone_idx)
 	if (!populated_zone(zone))
 		return;
 
+#ifdef CONFIG_FREEZER
+	if (pm_freezing)
+		return;
+#endif
+
 	if (!cpuset_zone_allowed_hardwall(zone, GFP_KERNEL))
 		return;
 	pgdat = zone->zone_pgdat;
@@ -3413,7 +3428,7 @@ void wakeup_kswapd(struct zone *zone, int order, enum zone_type classzone_idx)
  * LRU order by reclaiming preferentially
  * inactive > active > active referenced > active mapped
  */
-unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
+unsigned long shrink_memory_mask(unsigned long nr_to_reclaim, gfp_t mask)
 {
 	struct reclaim_state reclaim_state;
 	struct scan_control sc = {
@@ -3442,6 +3457,13 @@ unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
 
 	return nr_reclaimed;
 }
+EXPORT_SYMBOL_GPL(shrink_memory_mask);
+
+unsigned long shrink_all_memory(unsigned long nr_to_reclaim)
+{
+	return shrink_memory_mask(nr_to_reclaim, GFP_HIGHUSER_MOVABLE);
+}
+EXPORT_SYMBOL_GPL(shrink_all_memory);
 #endif /* CONFIG_HIBERNATION */
 
 /* It's optimal to keep kswapds on the same CPUs as their memory, but
