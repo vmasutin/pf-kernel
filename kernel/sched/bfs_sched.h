@@ -110,6 +110,11 @@ static inline u64 rq_clock_task(struct rq *rq)
 	return rq->clock_task;
 }
 
+extern int cpuset_cpumask_can_shrink(const struct cpumask *cur,
+				     const struct cpumask *trial);
+extern int task_can_attach(struct task_struct *p,
+			   const struct cpumask *cs_cpus_allowed);
+
 #ifdef CONFIG_NUMA
 enum numa_topology_type {
 	NUMA_DIRECT,
@@ -117,11 +122,6 @@ enum numa_topology_type {
 	NUMA_BACKPLANE,
 };
 #endif
-
-extern int cpuset_cpumask_can_shrink(const struct cpumask *cur,
-				     const struct cpumask *trial);
-extern int task_can_attach(struct task_struct *p,
-			   const struct cpumask *cs_cpus_allowed);
 
 #define rcu_dereference_check_sched_domain(p) \
 	rcu_dereference_check((p), \
