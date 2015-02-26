@@ -87,6 +87,7 @@ else
         # FIXME - should be integrated in Makefile.cpu (Makefile_32.cpu)
         cflags-$(CONFIG_MNATIVE) += $(call cc-option,-march=native)
         cflags-$(CONFIG_MK8) += $(call cc-option,-march=k8)
+        cflags-$(CONFIG_MK8SSE3) += $(call cc-option,-march=k8-sse3,-mtune=k8)
         cflags-$(CONFIG_MK10) += $(call cc-option,-march=amdfam10)
         cflags-$(CONFIG_MBARCELONA) += $(call cc-option,-march=barcelona)
         cflags-$(CONFIG_MBOBCAT) += $(call cc-option,-march=btver1)
@@ -97,16 +98,20 @@ else
 
         cflags-$(CONFIG_MCORE2) += \
                 $(call cc-option,-march=core2,$(call cc-option,-mtune=core2))
-        cflags-$(CONFIG_MCOREI7) += \
-                $(call cc-option,-march=corei7,$(call cc-option,-mtune=corei7))
-        cflags-$(CONFIG_MCOREI7AVX) += \
-                $(call cc-option,-march=corei7-avx,$(call cc-option,-mtune=corei7-avx))
-        cflags-$(CONFIG_MCOREAVXI) += \
-                $(call cc-option,-march=core-avx-i,$(call cc-option,-mtune=core-avx-i))
-        cflags-$(CONFIG_MCOREAVX2) += \
-                $(call cc-option,-march=core-avx2,$(call cc-option,-mtune=core-avx2))
-	cflags-$(CONFIG_MATOM) += $(call cc-option,-march=atom) \
-		$(call cc-option,-mtune=atom,$(call cc-option,-mtune=generic))
+        cflags-$(CONFIG_MNEHALEM) += \
+                $(call cc-option,-march=nehalem,$(call cc-option,-mtune=nehalem))
+        cflags-$(CONFIG_MWESTMERE) += \
+                $(call cc-option,-march=westmere,$(call cc-option,-mtune=westmere))
+        cflags-$(CONFIG_MSANDYBRIDGE) += \
+                $(call cc-option,-march=sandybridge,$(call cc-option,-mtune=sandybridge))
+        cflags-$(CONFIG_MIVYBRIDGE) += \
+                $(call cc-option,-march=ivybridge,$(call cc-option,-mtune=ivybridge))
+        cflags-$(CONFIG_MHASWELL) += \
+                $(call cc-option,-march=haswell,$(call cc-option,-mtune=haswell))
+        cflags-$(CONFIG_MBROADWELL) += \
+                $(call cc-option,-march=broadwell,$(call cc-option,-mtune=broadwell))
+        cflags-$(CONFIG_MATOM) += $(call cc-option,-march=bonnell) \
+                $(call cc-option,-mtune=bonnell,$(call cc-option,-mtune=generic))
         cflags-$(CONFIG_GENERIC_CPU) += $(call cc-option,-mtune=generic)
         KBUILD_CFLAGS += $(cflags-y)
 
