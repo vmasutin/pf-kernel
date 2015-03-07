@@ -102,6 +102,8 @@ else
                 $(call cc-option,-march=nehalem,$(call cc-option,-mtune=nehalem))
         cflags-$(CONFIG_MWESTMERE) += \
                 $(call cc-option,-march=westmere,$(call cc-option,-mtune=westmere))
+        cflags-$(CONFIG_MSILVERMONT) += \
+                $(call cc-option,-march=silvermont,$(call cc-option,-mtune=silvermont))
         cflags-$(CONFIG_MSANDYBRIDGE) += \
                 $(call cc-option,-march=sandybridge,$(call cc-option,-mtune=sandybridge))
         cflags-$(CONFIG_MIVYBRIDGE) += \
