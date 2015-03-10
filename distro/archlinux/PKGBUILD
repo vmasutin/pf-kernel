@@ -17,7 +17,7 @@ build() {
   sed -i '2iexit 0' scripts/depmod.sh
 
   # Detect CPUs count automatically
-  CPUS_COUNT=`cat /proc/cpuinfo | grep processor | wc -l`
+  CPUS_COUNT=$(nproc)
   echo "Compiling using $CPUS_COUNT thread(s)"
   LOCALVERSION="" make -j$CPUS_COUNT bzImage modules || return 1
 }
