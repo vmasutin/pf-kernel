@@ -1469,7 +1469,7 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 
 #ifdef CONFIG_SMT_NICE
 	if (!smt_should_schedule(p, target_cpu))
-		return NULL;
+		return;
 #endif
 	if (can_preempt(p, highest_priodl))
 		resched_curr(cpu_rq(target_cpu));
@@ -3631,7 +3631,7 @@ static void preempt_schedule_common(void)
 {
 	do {
 		__preempt_count_add(PREEMPT_ACTIVE);
-		__schedule();
+		schedule();
 		__preempt_count_sub(PREEMPT_ACTIVE);
 
 		/*
@@ -3692,7 +3692,7 @@ asmlinkage __visible void __sched notrace preempt_schedule_context(void)
 		 * an infinite recursion.
 		 */
 		prev_ctx = exception_enter();
-		__schedule();
+		schedule();
 		exception_exit(prev_ctx);
 
 		__preempt_count_sub(PREEMPT_ACTIVE);
