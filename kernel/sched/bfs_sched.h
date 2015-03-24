@@ -14,7 +14,6 @@ struct rq {
 
 	/* Stored data about rq->curr to work outside grq lock */
 	u64 rq_deadline;
-	u64 rq_priodl;
 	unsigned int rq_policy;
 	int rq_time_slice;
 	u64 rq_last_ran;
@@ -109,19 +108,6 @@ static inline u64 rq_clock_task(struct rq *rq)
 {
 	return rq->clock_task;
 }
-
-extern int cpuset_cpumask_can_shrink(const struct cpumask *cur,
-				     const struct cpumask *trial);
-extern int task_can_attach(struct task_struct *p,
-			   const struct cpumask *cs_cpus_allowed);
-
-#ifdef CONFIG_NUMA
-enum numa_topology_type {
-	NUMA_DIRECT,
-	NUMA_GLUELESS_MESH,
-	NUMA_BACKPLANE,
-};
-#endif
 
 #define rcu_dereference_check_sched_domain(p) \
 	rcu_dereference_check((p), \

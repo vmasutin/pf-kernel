@@ -134,7 +134,7 @@
 
 void print_scheduler_version(void)
 {
-	printk(KERN_INFO "BFS CPU scheduler v0.460 by Con Kolivas.\n");
+	printk(KERN_INFO "BFS CPU scheduler v0.461 by Con Kolivas.\n");
 }
 
 /*
@@ -181,6 +181,10 @@ struct global_rq {
 	unsigned long qnr; /* queued not running */
 	cpumask_t cpu_idle_map;
 	cpumask_t non_scaled_cpumask;
+#ifndef CONFIG_64BIT
+	raw_spinlock_t priodl_lock;
+#endif
+	u64 rq_priodls[NR_CPUS];
 #endif
 	int noc; /* num_online_cpus stored and updated when it changes */
 	u64 niffies; /* Nanosecond jiffies */
@@ -658,7 +662,6 @@ static inline bool scaling_rq(struct rq *rq);
  * Non scaled SMT of the cup
  * Non scaled cores/threads shares last level cache
  * Scaled same cpu as task originally runs on
- * Scaled same cpu as task originally runs on
  * Scaled SMT of the cup
  * Scaled cores/threads shares last level cache
  * Non scaled cores within the same physical cpu
@@ -872,6 +875,8 @@ static bool smt_should_schedule(struct task_struct *p, int cpu)
 	if (unlikely(!p->mm))
 		return true;
 	if (rt_task(p))
+		return true;
+	if (!idleprio_suitable(p))
 		return true;
 	best_bias = best_smt_bias(cpu);
 	/* The smt siblings are all idle or running IDLEPRIO */
@@ -1109,19 +1114,11 @@ static inline void check_task_changed(struct rq *rq, struct task_struct *p,
 #ifdef CONFIG_SMP
 void set_task_cpu(struct task_struct *p, unsigned int cpu)
 {
-#ifdef CONFIG_SCHED_DEBUG
-	/*
-	 * We should never call set_task_cpu() on a blocked task,
-	 * ttwu() will sort out the placement.
-	 */
-	WARN_ON_ONCE(p->state != TASK_RUNNING && p->state != TASK_WAKING &&
-			!p->on_rq);
 #ifdef CONFIG_LOCKDEP
 	/*
 	 * The caller should hold grq lock.
 	 */
 	WARN_ON_ONCE(debug_locks && !lockdep_is_held(&grq.lock));
-#endif
 #endif
 	if (task_cpu(p) == cpu)
 		return;
@@ -1424,8 +1421,7 @@ static inline bool needs_other_cpu(struct task_struct *p, int cpu)
  */
 static void try_preempt(struct task_struct *p, struct rq *this_rq)
 {
-	struct rq *rq, *highest_prio_rq = NULL;
-	int cpu;
+	int cpu, target_cpu;
 	u64 highest_priodl;
 	cpumask_t tmp;
 
@@ -1446,29 +1442,37 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 	if (unlikely(!cpumask_and(&tmp, cpu_online_mask, &p->cpus_allowed)))
 		return;
 
-	cpu = cpumask_first(&tmp);
-	rq = cpu_rq(cpu);
-	highest_prio_rq = rq;
-	highest_priodl = rq->rq_priodl;
+	target_cpu = cpu = cpumask_first(&tmp);
+#if defined(CONFIG_SMP) && !defined(CONFIG_64BIT)
+	raw_spin_lock(&grq.priodl_lock);
+#endif
+	highest_priodl = grq.rq_priodls[cpu];
+#if defined(CONFIG_SMP) && !defined(CONFIG_64BIT)
+	raw_spin_unlock(&grq.priodl_lock);
+#endif
 
 	for(;cpu = cpumask_next(cpu, &tmp), cpu < nr_cpu_ids;) {
 		u64 rq_priodl;
 
-		rq = cpu_rq(cpu);
-		rq_priodl = rq->rq_priodl;
+#if defined(CONFIG_SMP) && !defined(CONFIG_64BIT)
+		raw_spin_lock(&grq.priodl_lock);
+#endif
+		rq_priodl = grq.rq_priodls[cpu];
+#if defined(CONFIG_SMP) && !defined(CONFIG_64BIT)
+		raw_spin_unlock(&grq.priodl_lock);
+#endif
 		if (rq_priodl > highest_priodl ) {
+			target_cpu = cpu;
 			highest_priodl = rq_priodl;
-			highest_prio_rq = rq;
 		}
 	}
 
 #ifdef CONFIG_SMT_NICE
-	cpu = cpu_of(highest_prio_rq);
-	if (!smt_should_schedule(p, cpu))
-		return;
+	if (!smt_should_schedule(p, target_cpu))
+		return NULL;
 #endif
 	if (can_preempt(p, highest_priodl))
-		resched_curr(highest_prio_rq);
+		resched_curr(cpu_rq(target_cpu));
 }
 #else /* CONFIG_SMP */
 static inline bool needs_other_cpu(struct task_struct *p, int cpu)
@@ -1480,7 +1484,7 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 {
 	if (p->policy == SCHED_IDLEPRIO)
 		return;
-	if (can_preempt(p, uprq->rq_priodl))
+	if (can_preempt(p, grq.rq_priodls[0]))
 		resched_curr(uprq);
 }
 #endif /* CONFIG_SMP */
@@ -1912,6 +1916,7 @@ prepare_task_switch(struct rq *rq, struct task_struct *prev,
 
 /**
  * finish_task_switch - clean up after a task-switch
+ * @rq: runqueue associated with task-switch
  * @prev: the thread we just switched away from.
  *
  * finish_task_switch must be called after the context switch, paired
@@ -1967,7 +1972,6 @@ static struct rq *finish_task_switch(struct task_struct *prev)
 		kprobe_flush_task(prev);
 		put_task_struct(prev);
 	}
-
 	return rq;
 }
 
@@ -1980,7 +1984,7 @@ asmlinkage __visible void schedule_tail(struct task_struct *prev)
 {
 	struct rq *rq;
 
-	/* finish_task_switch() drops rq->lock and enables preemtion */
+	/* finish_task_switch() drops rq->lock and enables preemption */
 	preempt_disable();
 	rq = finish_task_switch(prev);
 	preempt_enable();
@@ -3312,7 +3316,13 @@ static inline void set_rq_task(struct rq *rq, struct task_struct *p)
 	rq->rq_last_ran = p->last_ran = rq->clock_task;
 	rq->rq_policy = p->policy;
 	rq->rq_prio = p->prio;
-	rq->rq_priodl = p->priodl;
+#if defined(CONFIG_SMP) && !defined(CONFIG_64BIT)
+	raw_spin_lock(&grq.priodl_lock);
+#endif
+	grq.rq_priodls[cpu_of(rq)] = p->priodl;
+#if defined(CONFIG_SMP) && !defined(CONFIG_64BIT)
+	raw_spin_unlock(&grq.priodl_lock);
+#endif
 #ifdef CONFIG_SMT_NICE
 	rq->rq_smt_bias = p->smt_bias;
 #endif
@@ -3324,7 +3334,13 @@ static inline void reset_rq_task(struct rq *rq, struct task_struct *p)
 	rq->rq_policy = p->policy;
 	rq->rq_prio = p->prio;
 	rq->rq_deadline = p->deadline;
-	rq->rq_priodl = p->priodl;
+#if defined(CONFIG_SMP) && !defined(CONFIG_64BIT)
+	raw_spin_lock(&grq.priodl_lock);
+#endif
+	grq.rq_priodls[cpu_of(rq)] = p->priodl;
+#if defined(CONFIG_SMP) && !defined(CONFIG_64BIT)
+	raw_spin_unlock(&grq.priodl_lock);
+#endif
 #ifdef CONFIG_SMT_NICE
 	rq->rq_smt_bias = p->smt_bias;
 #endif
@@ -3419,7 +3435,7 @@ static void wake_smt_siblings(int __maybe_unused cpu) {}
  *          - return from syscall or exception to user-space
  *          - return from interrupt-handler to user-space
  */
-static void __sched __schedule(void)
+asmlinkage __visible void __sched schedule(void)
 {
 	struct task_struct *prev, *next, *idle;
 	unsigned long *switch_count;
@@ -3473,6 +3489,17 @@ need_resched:
 			}
 		}
 		switch_count = &prev->nvcsw;
+	}
+
+	/*
+	 * If we are going to sleep and we have plugged IO queued, make
+	 * sure to submit it to avoid deadlocks.
+	 */
+	if (unlikely(deactivate && blk_needs_flush_plug(prev))) {
+		grq_unlock_irq();
+		preempt_enable_no_resched();
+		blk_schedule_flush_plug(prev);
+		goto need_resched;
 	}
 
 	update_clocks(rq);
@@ -3534,7 +3561,7 @@ need_resched:
 		/*
 		 * Don't reschedule an idle task or deactivated tasks
 		 */
-		if ( prev != idle && !deactivate)
+		if (prev != idle && !deactivate)
 			resched_best_idle(prev);
 		/*
 		 * Don't stick tasks when a real time task is going to run as
@@ -3555,6 +3582,7 @@ need_resched:
 
 		rq = context_switch(rq, prev, next); /* unlocks the grq */
 		cpu = cpu_of(rq);
+		idle = rq->idle;
 	} else {
 		check_smt_siblings(cpu);
 		grq_unlock_irq();
@@ -3566,25 +3594,6 @@ rerun_prev_unlocked:
 		goto need_resched;
 }
 
-static inline void sched_submit_work(struct task_struct *tsk)
-{
-	if (!tsk->state || tsk_is_pi_blocked(tsk))
-		return;
-	/*
-	 * If we are going to sleep and we have plugged IO queued,
-	 * make sure to submit it to avoid deadlocks.
-	 */
-	if (blk_needs_flush_plug(tsk))
-		blk_schedule_flush_plug(tsk);
-}
-
-asmlinkage __visible void __sched schedule(void)
-{
-	struct task_struct *tsk = current;
-
-	sched_submit_work(tsk);
-	__schedule();
-}
 EXPORT_SYMBOL(schedule);
 
 #ifdef CONFIG_CONTEXT_TRACKING
@@ -3713,7 +3722,7 @@ asmlinkage __visible void __sched preempt_schedule_irq(void)
 	do {
 		__preempt_count_add(PREEMPT_ACTIVE);
 		local_irq_enable();
-		__schedule();
+		schedule();
 		local_irq_disable();
 		__preempt_count_sub(PREEMPT_ACTIVE);
 
@@ -5193,23 +5202,14 @@ void init_idle(struct task_struct *idle, int cpu)
 #endif
 }
 
-void resched_cpu(int cpu)
-{
-	unsigned long flags;
-
-	grq_lock_irqsave(&flags);
-	resched_curr(cpu_rq(cpu));
-	grq_unlock_irqrestore(&flags);
-}
-
-int cpuset_cpumask_can_shrink(const struct cpumask *cur,
-			     const struct cpumask *trial)
+int cpuset_cpumask_can_shrink(const struct cpumask __maybe_unused *cur,
+			      const struct cpumask __maybe_unused *trial)
 {
 	return 1;
 }
 
 int task_can_attach(struct task_struct *p,
-		   const struct cpumask *cs_cpus_allowed)
+		    const struct cpumask *cs_cpus_allowed)
 {
 	int ret = 0;
 
@@ -5222,11 +5222,19 @@ int task_can_attach(struct task_struct *p,
 	 * success of set_cpus_allowed_ptr() on all attached tasks
 	 * before cpus_allowed may be changed.
 	 */
-	if (p->flags & PF_NO_SETAFFINITY) {
+	if (p->flags & PF_NO_SETAFFINITY)
 		ret = -EINVAL;
-	}
 
 	return ret;
+}
+
+void resched_cpu(int cpu)
+{
+	unsigned long flags;
+
+	grq_lock_irqsave(&flags);
+	resched_curr(cpu_rq(cpu));
+	grq_unlock_irqrestore(&flags);
 }
 
 #ifdef CONFIG_SMP
@@ -6192,9 +6200,7 @@ static void claim_allocations(int cpu, struct sched_domain *sd)
 
 #ifdef CONFIG_NUMA
 static int sched_domains_numa_levels;
-enum numa_topology_type sched_numa_topology_type;
 static int *sched_domains_numa_distance;
-int sched_max_numa_distance;
 static struct cpumask ***sched_domains_numa_masks;
 static int sched_domains_curr_level;
 #endif
@@ -6366,7 +6372,7 @@ static void sched_numa_warn(const char *str)
 	printk(KERN_WARNING "\n");
 }
 
-bool find_numa_distance(int distance)
+static bool find_numa_distance(int distance)
 {
 	int i;
 
@@ -6379,56 +6385,6 @@ bool find_numa_distance(int distance)
 	}
 
 	return false;
-}
-
-/*
- * A system can have three types of NUMA topology:
- * NUMA_DIRECT: all nodes are directly connected, or not a NUMA system
- * NUMA_GLUELESS_MESH: some nodes reachable through intermediary nodes
- * NUMA_BACKPLANE: nodes can reach other nodes through a backplane
- *
- * The difference between a glueless mesh topology and a backplane
- * topology lies in whether communication between not directly
- * connected nodes goes through intermediary nodes (where programs
- * could run), or through backplane controllers. This affects
- * placement of programs.
- *
- * The type of topology can be discerned with the following tests:
- * - If the maximum distance between any nodes is 1 hop, the system
- *   is directly connected.
- * - If for two nodes A and B, located N > 1 hops away from each other,
- *   there is an intermediary node C, which is < N hops away from both
- *   nodes A and B, the system is a glueless mesh.
- */
-static void init_numa_topology_type(void)
-{
-	int a, b, c, n;
-
-	n = sched_max_numa_distance;
-
-	if (n <= 1)
-		sched_numa_topology_type = NUMA_DIRECT;
-
-	for_each_online_node(a) {
-		for_each_online_node(b) {
-			/* Find two nodes furthest removed from each other. */
-			if (node_distance(a, b) < n)
-				continue;
-
-			/* Is there an intermediary node between a and b? */
-			for_each_online_node(c) {
-				if (node_distance(a, c) < n &&
-				    node_distance(b, c) < n) {
-					sched_numa_topology_type =
-							NUMA_GLUELESS_MESH;
-					return;
-				}
-			}
-
-			sched_numa_topology_type = NUMA_BACKPLANE;
-			return;
-		}
-	}
 }
 
 static void sched_init_numa(void)
@@ -6563,9 +6519,6 @@ static void sched_init_numa(void)
 	sched_domain_topology = tl;
 
 	sched_domains_numa_levels = level;
-	sched_max_numa_distance = sched_domains_numa_distance[level - 1];
-
-	init_numa_topology_type();
 }
 
 static void sched_domains_numa_masks_set(int cpu)
@@ -7098,7 +7051,8 @@ void __init sched_init_smp(void)
 #endif
 #ifdef CONFIG_SCHED_SMT
 		for_each_cpu_mask(other_cpu, *thread_cpumask(cpu))
-			rq->cpu_locality[other_cpu] = 1;
+			if (rq->cpu_locality[other_cpu] > 1)
+				rq->cpu_locality[other_cpu] = 1;
 #endif
 	}
 	grq_unlock_irq();
@@ -7150,6 +7104,9 @@ void __init sched_init(void)
 #ifdef CONFIG_SMP
 	init_defrootdomain();
 	cpumask_clear(&grq.cpu_idle_map);
+#ifndef CONFIG_64BIT
+	raw_spin_lock_init(&grq.priodl_lock);
+#endif
 #else
 	uprq = &per_cpu(runqueues, 0);
 #endif
