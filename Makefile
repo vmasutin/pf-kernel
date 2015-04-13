@@ -1,8 +1,8 @@
 VERSION = 4
 PATCHLEVEL = 0
 SUBLEVEL = 0
-EXTRAVERSION =
-NAME = Hurr durr I'ma sheep
+EXTRAVERSION = -pf1
+NAME = Imma not a sheep
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
