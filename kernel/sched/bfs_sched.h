@@ -12,6 +12,9 @@ struct rq {
 	struct task_struct *curr, *idle, *stop;
 	struct mm_struct *prev_mm;
 
+	/* Pointer to grq spinlock */
+	raw_spinlock_t *grq_lock;
+
 	/* Stored data about rq->curr to work outside grq lock */
 	u64 rq_deadline;
 	unsigned int rq_policy;
@@ -21,6 +24,7 @@ struct rq {
 	bool rq_running; /* There is a task running */
 	int soft_affined; /* Running or queued tasks with this set as their rq */
 #ifdef CONFIG_SMT_NICE
+	struct mm_struct *rq_mm;
 	int rq_smt_bias; /* Policy/nice level bias across smt siblings */
 #endif
 	/* Accurate timekeeping data */
@@ -38,6 +42,14 @@ struct rq {
 	struct root_domain *rd;
 	struct sched_domain *sd;
 	int *cpu_locality; /* CPU relative cache distance */
+#ifdef CONFIG_SCHED_SMT
+	bool (*siblings_idle)(int cpu);
+	/* See if all smt siblings are idle */
+#endif /* CONFIG_SCHED_SMT */
+#ifdef CONFIG_SCHED_MC
+	bool (*cache_idle)(int cpu);
+	/* See if all cache siblings are idle */
+#endif /* CONFIG_SCHED_MC */
 	u64 last_niffy; /* Last time this RQ updated grq.niffies */
 #endif /* CONFIG_SMP */
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
@@ -92,20 +104,24 @@ static struct rq *uprq;
 #define cpu_curr(cpu)	((uprq)->curr)
 #else /* CONFIG_SMP */
 DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
-#define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
 #define this_rq()		this_cpu_ptr(&runqueues)
 #define raw_rq()		raw_cpu_ptr(&runqueues)
-#define task_rq(p)		cpu_rq(task_cpu(p))
-#define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
 #endif /* CONFIG_SMP */
+
+static inline u64 __rq_clock_broken(struct rq *rq)
+{
+	return ACCESS_ONCE(rq->clock);
+}
 
 static inline u64 rq_clock(struct rq *rq)
 {
+	lockdep_assert_held(rq->grq_lock);
 	return rq->clock;
 }
 
 static inline u64 rq_clock_task(struct rq *rq)
 {
+	lockdep_assert_held(rq->grq_lock);
 	return rq->clock_task;
 }
 
