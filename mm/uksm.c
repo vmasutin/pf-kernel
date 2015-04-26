@@ -1465,7 +1465,7 @@ static int write_protect_page(struct vm_area_struct *vma, struct page *page,
 		 * this assure us that no O_DIRECT can happen after the check
 		 * or in the middle of the check.
 		 */
-		entry = ptep_clear_flush(vma, addr, ptep);
+		entry = ptep_clear_flush_notify(vma, addr, ptep);
 		/*
 		 * Check that no O_DIRECT or similar I/O is in progress on the
 		 * page
@@ -1549,7 +1549,7 @@ static int replace_page(struct vm_area_struct *vma, struct page *page,
 	}
 
 	flush_cache_page(vma, addr, pte_pfn(*ptep));
-	ptep_clear_flush(vma, addr, ptep);
+	ptep_clear_flush_notify(vma, addr, ptep);
 	entry = mk_pte(kpage, vma->vm_page_prot);
 
 	/* special treatment is needed for zero_page */
@@ -1798,7 +1798,7 @@ static int restore_uksm_page_pte(struct vm_area_struct *vma, unsigned long addr,
 	 * pte.
 	 */
 	flush_cache_page(vma, addr, pte_pfn(*ptep));
-	ptep_clear_flush(vma, addr, ptep);
+	ptep_clear_flush_notify(vma, addr, ptep);
 	set_pte_at_notify(mm, addr, ptep, orig_pte);
 
 	pte_unmap_unlock(ptep, ptl);
@@ -2052,7 +2052,7 @@ static int try_merge_rmap_item(struct rmap_item *item,
 	page_add_anon_rmap(tree_page, vma, addr);
 
 	flush_cache_page(vma, addr, pte_pfn(*ptep));
-	ptep_clear_flush(vma, addr, ptep);
+	ptep_clear_flush_notify(vma, addr, ptep);
 	set_pte_at_notify(vma->vm_mm, addr, ptep,
 			  mk_pte(tree_page, vma->vm_page_prot));
 
@@ -2651,7 +2651,7 @@ static int break_ksm(struct vm_area_struct *vma, unsigned long addr)
 		} else
 			ret = VM_FAULT_WRITE;
 		put_page(page);
-	} while (!(ret & (VM_FAULT_WRITE | VM_FAULT_SIGBUS | VM_FAULT_OOM)));
+	} while (!(ret & (VM_FAULT_WRITE | VM_FAULT_SIGBUS | VM_FAULT_SIGSEGV | VM_FAULT_OOM)));
 	/*
 	 * We must loop because handle_mm_fault() may back out if there's
 	 * any difficulty e.g. if pte accessed bit gets updated concurrently.
