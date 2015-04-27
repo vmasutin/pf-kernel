@@ -42,14 +42,6 @@ struct rq {
 	struct root_domain *rd;
 	struct sched_domain *sd;
 	int *cpu_locality; /* CPU relative cache distance */
-#ifdef CONFIG_SCHED_SMT
-	bool (*siblings_idle)(int cpu);
-	/* See if all smt siblings are idle */
-#endif /* CONFIG_SCHED_SMT */
-#ifdef CONFIG_SCHED_MC
-	bool (*cache_idle)(int cpu);
-	/* See if all cache siblings are idle */
-#endif /* CONFIG_SCHED_MC */
 	u64 last_niffy; /* Last time this RQ updated grq.niffies */
 #endif /* CONFIG_SMP */
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
@@ -104,8 +96,11 @@ static struct rq *uprq;
 #define cpu_curr(cpu)	((uprq)->curr)
 #else /* CONFIG_SMP */
 DECLARE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
+#define cpu_rq(cpu)		(&per_cpu(runqueues, (cpu)))
 #define this_rq()		this_cpu_ptr(&runqueues)
 #define raw_rq()		raw_cpu_ptr(&runqueues)
+#define task_rq(p)		cpu_rq(task_cpu(p))
+#define cpu_curr(cpu)		(cpu_rq(cpu)->curr)
 #endif /* CONFIG_SMP */
 
 static inline u64 __rq_clock_broken(struct rq *rq)
