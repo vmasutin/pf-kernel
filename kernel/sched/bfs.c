@@ -1465,7 +1465,7 @@ static void try_preempt(struct task_struct *p, struct rq *this_rq)
 
 #ifdef CONFIG_SMT_NICE
 	if (!smt_should_schedule(p, target_cpu))
-		return NULL;
+		return;
 #endif
 	if (can_preempt(p, highest_priodl))
 		resched_curr(cpu_rq(target_cpu));
