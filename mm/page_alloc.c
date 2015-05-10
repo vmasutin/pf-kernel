@@ -975,7 +975,9 @@ static int prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags,
                 if (unlikely(toi_incremental_support() && gfp_flags & ___GFP_TOI_NOTRACK)) {
                     // Make the page writable if it's protected, and set it to be untracked.
                     SetPageTOI_Untracked(p);
+#ifdef CONFIG_TOI_INCREMENTAL
                     toi_make_writable((unsigned long) page_address(p));
+#endif
                 }
 	}
 
