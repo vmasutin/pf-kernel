@@ -101,10 +101,8 @@ static void *get_image_page(gfp_t gfp_mask, int safe_needed)
 {
 	void *res;
 
-#ifdef CONFIG_TOI
-	if (toi_running)
-		return (void *) toi_get_nonconflicting_page();
-#endif
+        if (toi_running)
+            return (void *) toi_get_nonconflicting_page();
 
 	res = (void *)get_zeroed_page(gfp_mask);
 	if (safe_needed)
