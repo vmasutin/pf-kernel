@@ -652,7 +652,7 @@ no_context(struct pt_regs *regs, unsigned long error_code,
 	unsigned long flags;
 	int sig;
 
-        if (toi_make_writable(address)) {
+        if (toi_make_writable(init_mm.pgd, address)) {
             return;
         }
 
@@ -914,7 +914,7 @@ mm_fault_error(struct pt_regs *regs, unsigned long error_code,
 /**
  * _toi_do_cbw - Do a copy-before-write before letting the faulting process continue
  */
-static void _toi_do_cbw(struct page *page)
+static void toi_do_cbw(struct page *page)
 {
     struct toi_cbw_state *state = this_cpu_ptr(&toi_cbw_states);
 
@@ -922,9 +922,10 @@ static void _toi_do_cbw(struct page *page)
     wmb();
 
     if (state->enabled && state->next && PageTOI_CBW(page)) {
-        memcpy(state->next->virt, page_address(page), PAGE_SIZE);
-        state->next->pfn = page_to_pfn(page);
-        state->next++;
+        struct toi_cbw *this = state->next;
+        memcpy(this->virt, page_address(page), PAGE_SIZE);
+        this->pfn = page_to_pfn(page);
+        state->next = this->next;
     }
 
     state->active = 0;
@@ -949,8 +950,7 @@ int _toi_make_writable(pte_t *pte)
         SetPageTOI_Dirty(page);
         ClearPageTOI_RO(page);
 
-        if (PageTOI_CBW(page))
-            _toi_do_cbw(page);
+        toi_do_cbw(page);
 
         load_cr3(pgd);
         return 1;
@@ -969,14 +969,13 @@ int _toi_make_writable(pte_t *pte)
  * see if the page was made RO by TOI, and mark it dirty/release the protection
  * if it was.
  */
-int toi_make_writable(unsigned long address)
+int toi_make_writable(pgd_t *pgd, unsigned long address)
 {
-    pgd_t *pgd;
     pud_t *pud;
     pmd_t *pmd;
     pte_t *pte;
 
-    pgd = init_mm.pgd + pgd_index(address);
+    pgd = pgd + pgd_index(address);
     if (!pgd_present(*pgd))
         return 0;
 
@@ -1174,7 +1173,7 @@ __do_page_fault(struct pt_regs *regs, unsigned long error_code,
          *
          * Do it early to avoid double faults.
          */
-        if (unlikely(toi_make_writable(address)))
+        if (unlikely(toi_make_writable(init_mm.pgd, address)))
             return;
 
 	if (unlikely(kmmio_fault(regs, address)))
