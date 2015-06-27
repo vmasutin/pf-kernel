@@ -665,12 +665,12 @@ static inline int queued_notrunning(void)
 static inline void set_cpuidle_map(int cpu)
 {
 	if (likely(cpu_online(cpu)))
-		cpu_set(cpu, grq.cpu_idle_map);
+		cpumask_set_cpu(cpu, &grq.cpu_idle_map);
 }
 
 static inline void clear_cpuidle_map(int cpu)
 {
-	cpu_clear(cpu, grq.cpu_idle_map);
+	cpumask_clear_cpu(cpu, &grq.cpu_idle_map);
 }
 
 static inline bool suitable_idle_cpus(struct task_struct *p)
@@ -865,7 +865,7 @@ static int best_smt_bias(int cpu)
 {
 	int other_cpu, best_bias = 0;
 
-	for_each_cpu_mask(other_cpu, *thread_cpumask(cpu)) {
+	for_each_cpu(other_cpu, thread_cpumask(cpu)) {
 		struct rq *rq;
 
 		if (other_cpu == cpu)
@@ -3346,7 +3346,7 @@ static void check_smt_siblings(int cpu)
 {
 	int other_cpu;
 
-	for_each_cpu_mask(other_cpu, *thread_cpumask(cpu)) {
+	for_each_cpu(other_cpu, thread_cpumask(cpu)) {
 		struct task_struct *p;
 		struct rq *rq;
 
@@ -3372,7 +3372,7 @@ static void wake_smt_siblings(int cpu)
 	if (!queued_notrunning())
 		return;
 
-	for_each_cpu_mask(other_cpu, *thread_cpumask(cpu)) {
+	for_each_cpu(other_cpu, thread_cpumask(cpu)) {
 		struct rq *rq;
 
 		if (other_cpu == cpu)
@@ -5198,7 +5198,7 @@ void init_idle(struct task_struct *idle, int cpu)
 	idle->smt_bias = 0;
 #endif
 	set_rq_task(rq, idle);
-	do_set_cpus_allowed(idle, &cpumask_of_cpu(cpu));
+	do_set_cpus_allowed(idle, cpumask_of(cpu));
 	/* Silence PROVE_RCU */
 	rcu_read_lock();
 	set_task_cpu(idle, cpu);
@@ -6065,9 +6065,6 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 	rcu_assign_pointer(rq->sd, sd);
 	destroy_sched_domains(tmp, cpu);
 }
-
-/* cpus with isolated domains */
-static cpumask_var_t cpu_isolated_map;
 
 /* Setup the mask of cpus configured for isolated domains */
 static int __init isolated_cpu_setup(char *str)
@@ -7016,7 +7013,7 @@ void __init sched_init_smp(void)
 			if (sd->level > SD_LV_NODE)
 				continue;
 			/* Set locality to local node if not already found lower */
-			for_each_cpu_mask(other_cpu, *sched_domain_span(sd)) {
+			for_each_cpu(other_cpu, sched_domain_span(sd)) {
 				if (rq->cpu_locality[other_cpu] > 3)
 					rq->cpu_locality[other_cpu] = 3;
 			}
@@ -7029,7 +7026,7 @@ void __init sched_init_smp(void)
 		}
 #endif
 #ifdef CONFIG_SCHED_SMT
-		for_each_cpu_mask(other_cpu, *thread_cpumask(cpu))
+		for_each_cpu(other_cpu, thread_cpumask(cpu))
 			if (rq->cpu_locality[other_cpu] > 1)
 				rq->cpu_locality[other_cpu] = 1;
 #endif
