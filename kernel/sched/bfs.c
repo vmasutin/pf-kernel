@@ -6066,6 +6066,9 @@ cpu_attach_domain(struct sched_domain *sd, struct root_domain *rd, int cpu)
 	destroy_sched_domains(tmp, cpu);
 }
 
+/* cpus with isolated domains */
+cpumask_var_t cpu_isolated_map;
+
 /* Setup the mask of cpus configured for isolated domains */
 static int __init isolated_cpu_setup(char *str)
 {
