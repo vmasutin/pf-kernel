@@ -135,6 +135,7 @@
 void print_scheduler_version(void)
 {
 	printk(KERN_INFO "BFS CPU scheduler v0.462 by Con Kolivas.\n");
+	printk(KERN_INFO "BFS enhancement patch set by Alfred Chen.\n");
 }
 
 /*
@@ -448,25 +449,6 @@ static inline void task_grq_unlock(unsigned long *flags)
 	__releases(grq.lock)
 {
 	grq_unlock_irqrestore(flags);
-}
-
-/**
- * grunqueue_is_locked
- *
- * Returns true if the global runqueue is locked.
- * This interface allows printk to be called with the runqueue lock
- * held and know whether or not it is OK to wake up the klogd.
- */
-bool grunqueue_is_locked(void)
-{
-	return raw_spin_is_locked(&grq.lock);
-}
-
-void grq_unlock_wait(void)
-	__releases(grq.lock)
-{
-	smp_mb(); /* spin-unlock-wait is not a full memory barrier */
-	raw_spin_unlock_wait(&grq.lock);
 }
 
 static inline void time_grq_lock(struct rq *rq, unsigned long *flags)
@@ -1107,13 +1089,6 @@ static inline void deactivate_task(struct task_struct *p, struct rq *rq)
 	p->on_rq = 0;
 	grq.nr_running--;
 	clear_sticky(p);
-}
-
-static ATOMIC_NOTIFIER_HEAD(task_migration_notifier);
-
-void register_task_migration_notifier(struct notifier_block *n)
-{
-	atomic_notifier_chain_register(&task_migration_notifier, n);
 }
 
 #ifdef CONFIG_SMP
@@ -3611,7 +3586,7 @@ asmlinkage __visible void __sched schedule_user(void)
 	 * we find a better solution.
 	 *
 	 * NB: There are buggy callers of this function.  Ideally we
-	 * should warn if prev_state != IN_USER, but that will trigger
+	 * should warn if prev_state != CONTEXT_USER, but that will trigger
 	 * too frequently to make sense yet.
 	 */
 	enum ctx_state prev_state = exception_enter();
@@ -4088,6 +4063,9 @@ recheck:
 		if (!SCHED_RANGE(policy))
 			return -EINVAL;
 	}
+
+	if (attr->sched_flags & ~(SCHED_FLAG_RESET_ON_FORK))
+		return -EINVAL;
 
 	/*
 	 * Valid priorities for SCHED_FIFO and SCHED_RR are
@@ -4971,10 +4949,7 @@ long __sched io_schedule_timeout(long timeout)
 	long ret;
 
 	current->in_iowait = 1;
-	if (old_iowait)
-		blk_schedule_flush_plug(current);
-	else
-		blk_flush_plug(current);
+	blk_schedule_flush_plug(current);
 
 	delayacct_blkio_start();
 	rq = raw_rq();
@@ -5194,11 +5169,13 @@ void init_idle(struct task_struct *idle, int cpu)
 	idle->state = TASK_RUNNING;
 	/* Setting prio to illegal value shouldn't matter when never queued */
 	idle->prio = PRIO_LIMIT;
+	idle->deadline = 0ULL;
+	update_task_priodl(idle);
 #ifdef CONFIG_SMT_NICE
 	idle->smt_bias = 0;
 #endif
 	set_rq_task(rq, idle);
-	do_set_cpus_allowed(idle, cpumask_of(cpu));
+	do_set_cpus_allowed(idle, get_cpu_mask(cpu));
 	/* Silence PROVE_RCU */
 	rcu_read_lock();
 	set_task_cpu(idle, cpu);
