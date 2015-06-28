@@ -312,9 +312,10 @@ static int proc_pid_schedstat(struct seq_file *m, struct pid_namespace *ns,
 			      struct pid *pid, struct task_struct *task)
 {
 	seq_printf(m, "%llu %llu %lu\n",
-			(unsigned long long)tsk_seruntime(task),
-			(unsigned long long)task->sched_info.run_delay,
-			task->sched_info.pcount);
+		   (unsigned long long)tsk_seruntime(task),
+		   (unsigned long long)task->sched_info.run_delay,
+		   task->sched_info.pcount);
+
 	return 0;
 }
 #endif
