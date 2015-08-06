@@ -88,7 +88,7 @@ struct rq *cpu_rq(int cpu);
 #endif
 
 #ifndef CONFIG_SMP
-static struct rq *uprq;
+extern struct rq *uprq;
 #define cpu_rq(cpu)	(uprq)
 #define this_rq()	(uprq)
 #define raw_rq()	(uprq)
