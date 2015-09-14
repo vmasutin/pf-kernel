@@ -4382,7 +4382,7 @@ static int __init bfq_init(void)
 	if (ret)
 		goto err_pol_unreg;
 
-	pr_info("BFQ I/O-scheduler: v7r9 (blkio)");
+	pr_info("BFQ I/O-scheduler: v7r9");
 
 	return 0;
 
