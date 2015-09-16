@@ -130,7 +130,7 @@
 void print_scheduler_version(void)
 {
 	printk(KERN_INFO "BFS CPU scheduler v0.463 by Con Kolivas.\n");
-	printk(KERN_INFO "BFS enhancement patchset v4.2_0463_1 by Alfred Chen.\n");
+	printk(KERN_INFO "BFS enhancement patchset v4.2_0463_2 by Alfred Chen.\n");
 }
 
 /*
@@ -816,60 +816,6 @@ static inline int nonllc_cpu_check(int cpu, cpumask_t *cpumask, cpumask_t *res_m
 	);
 }
 
-/*
- * closest_mask_cpu() doesn't check for the original cpu,
- * caller should ensure cpumask is not empty
- */
-static int closest_mask_cpu(int cpu, cpumask_t *cpumask)
-{
-	cpumask_t tmpmask, non_scaled_mask;
-	cpumask_t *res_mask = &tmpmask;
-
-	if (cpumask_and(&non_scaled_mask, cpumask, &grq.non_scaled_cpumask)) {
-		/*
-		 * non_scaled llc cpus checking
-		 */
-		if (llc_cpu_check(cpu, &non_scaled_mask, res_mask))
-			return cpumask_first(res_mask);
-		/*
-		 * scaling llc cpus checking
-		 */
-		if (llc_cpu_check(cpu, cpumask, res_mask))
-			return cpumask_first(res_mask);
-
-		/*
-		 * non_scaled non_llc cpus checking
-		 */
-		if (nonllc_cpu_check(cpu, &non_scaled_mask, res_mask))
-			return cpumask_first(res_mask);
-		/*
-		 * scaling non_llc cpus checking
-		 */
-		if (nonllc_cpu_check(cpu, cpumask, res_mask))
-			return cpumask_first(res_mask);
-
-		/* All cpus avariable */
-
-		return cpumask_first(cpumask);
-	}
-
-	/*
-	 * scaling llc cpus checking
-	 */
-	if (llc_cpu_check(cpu, cpumask, res_mask))
-		return cpumask_first(res_mask);
-
-	/*
-	 * scaling non_llc cpus checking
-	 */
-	if (nonllc_cpu_check(cpu, cpumask, res_mask))
-		return cpumask_first(res_mask);
-
-	/* All cpus avariable */
-
-	return cpumask_first(cpumask);
-}
-
 static inline int best_mask_cpu(const int cpu, cpumask_t *cpumask)
 {
 	cpumask_t tmpmask, non_scaled_mask;
@@ -1040,28 +986,6 @@ static inline bool resched_best_idle(struct task_struct *p)
                 int best_cpu;
 
                 best_cpu = best_mask_cpu(task_cpu(p), &check_cpumask);
-#ifdef CONFIG_SMT_NICE
-		if (!smt_should_schedule(p, best_cpu))
-			return false;
-#endif
-		resched_curr(cpu_rq(best_cpu));
-		return true;
-	}
-	return false;
-}
-
-/* Reschedule the best idle CPU that is not this one. */
-static bool
-resched_closest_idle(struct rq *rq, int cpu, struct task_struct *p)
-{
-        cpumask_t check_cpumask;
-
-	cpumask_copy(&check_cpumask, &p->cpus_allowed);
-	cpumask_clear_cpu(cpu, &check_cpumask);
-        if (cpumask_and(&check_cpumask, &check_cpumask, &grq.cpu_idle_map)) {
-                int best_cpu;
-
-                best_cpu = closest_mask_cpu(task_cpu(p), &check_cpumask);
 #ifdef CONFIG_SMT_NICE
 		if (!smt_should_schedule(p, best_cpu))
 			return false;
@@ -1268,18 +1192,14 @@ swap_sticky(struct rq *rq, int cpu, struct task_struct *p)
 			p->sticky = true;
 			return;
 		}
-		if (task_sticky(rq->sticky_task)) {
+		if (task_sticky(rq->sticky_task))
 			clear_sticky(rq->sticky_task);
-			resched_closest_idle(rq, cpu, rq->sticky_task);
-		}
 	}
 	if (!rt_task(p)) {
 		p->sticky = true;
 		rq->sticky_task = p;
-	} else {
-		resched_closest_idle(rq, cpu, p);
+	} else
 		rq->sticky_task = NULL;
-	}
 }
 
 static inline void unstick_task(struct rq *rq, struct task_struct *p)
@@ -2792,11 +2712,14 @@ void account_idle_time(cputime_t cputime)
 {
 }
 
+#ifdef CONFIG_NO_HZ_COMMON
+
+#ifdef CONFIG_SMP
 void update_cpu_load_nohz(void)
 {
 }
+#endif
 
-#ifdef CONFIG_NO_HZ_COMMON
 void calc_load_enter_idle(void)
 {
 }
