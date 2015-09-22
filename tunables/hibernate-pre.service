@@ -1,0 +1,15 @@
+[Unit]
+Description=Pre-hibernation hooks
+Before=hibernate.target
+
+[Service]
+Type=oneshot
+ExecStart=-/usr/bin/bash -c "echo 1 >/sys/power/tuxonice/replace_swsusp"
+ExecStart=-/usr/bin/bash -c "echo 1 >/sys/power/tuxonice/user_interface/enable_escape"
+ExecStart=-/usr/bin/bash -c "echo 1 >/sys/power/tuxonice/user_interface/default_console_level"
+ExecStart=-/usr/bin/uksmctl -d
+ExecStart=-/usr/bin/bash -c "echo 3 >/proc/sys/vm/drop_caches"
+ExecStart=-/usr/bin/sync
+
+[Install]
+WantedBy=hibernate.target

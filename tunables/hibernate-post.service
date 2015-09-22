@@ -1,0 +1,10 @@
+[Unit]
+Description=Pre-hibernation hooks
+After=hibernate.target
+
+[Service]
+Type=oneshot
+ExecStart=-/usr/bin/uksmctl -a
+
+[Install]
+WantedBy=hibernate.target
