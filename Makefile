@@ -1,8 +1,8 @@
 VERSION = 4
 PATCHLEVEL = 3
 SUBLEVEL = 0
-EXTRAVERSION =
-NAME = Blurry Fish Butt
+EXTRAVERSION = -pf1
+NAME = Provoking Unhealthy Discussions
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
