@@ -130,7 +130,7 @@
 void print_scheduler_version(void)
 {
 	printk(KERN_INFO "BFS CPU scheduler v0.463 by Con Kolivas.\n");
-	printk(KERN_INFO "BFS enhancement patchset v4.3_0463_0 by Alfred Chen.\n");
+	printk(KERN_INFO "BFS enhancement patchset v4.3_0463_1 by Alfred Chen.\n");
 }
 
 /*
@@ -1170,13 +1170,12 @@ void set_task_cpu(struct task_struct *p, unsigned int cpu)
 	task_thread_info(p)->cpu = cpu;
 }
 
-void
+static inline void
 set_cpus_allowed_common(struct task_struct *p, const struct cpumask *new_mask)
 {
-	cpumask_copy(tsk_cpus_allowed(p), new_mask);
 	cpumask_copy(&p->cpus_allowed_master, new_mask);
 	if (likely(cpumask_and(&p->cpus_allowed,
-	    &p->cpus_allowed_master, cpu_active_mask))) {
+			       &p->cpus_allowed_master, cpu_active_mask))) {
 		p->nr_cpus_allowed = cpumask_weight(new_mask);
 		return;
 	}
