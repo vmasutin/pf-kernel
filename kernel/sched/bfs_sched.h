@@ -9,11 +9,23 @@
  * This data should only be modified by the local cpu.
  */
 struct rq {
+	/* runqueue lock: */
+	raw_spinlock_t lock;
+
 	struct task_struct *curr, *idle, *stop;
+	struct task_struct *try_preempt_tsk;
+	struct task_struct *preempt_task;
 	struct mm_struct *prev_mm;
 
-	/* Pointer to grq spinlock */
-	raw_spinlock_t *grq_lock;
+	/* whether hold grq.lock in schedule() */
+	bool grq_locked;
+
+	/* switch count */
+	u64 nr_switches;
+	/* switch cost */
+	u64 switch_cost;
+	/* cache switch cost threshold */
+	unsigned int cache_scost_threshold;
 
 	/* Stored data about rq->curr to work outside grq lock */
 	u64 rq_deadline;
@@ -22,7 +34,6 @@ struct rq {
 	u64 rq_last_ran;
 	int rq_prio;
 	bool rq_running; /* There is a task running */
-	int soft_affined; /* Running or queued tasks with this set as their rq */
 #ifdef CONFIG_SMT_NICE
 	struct mm_struct *rq_mm;
 	int rq_smt_bias; /* Policy/nice level bias across smt siblings */
@@ -33,6 +44,10 @@ struct rq {
 		iowait_pc, idle_pc;
 	atomic_t nr_iowait;
 
+	/* rq cached counters */
+	unsigned long nr_running;
+	long nr_uninterruptible;
+
 #ifdef CONFIG_SMP
 	int cpu;		/* cpu of this runqueue */
 	bool online;
@@ -42,7 +57,6 @@ struct rq {
 	struct root_domain *rd;
 	struct sched_domain *sd;
 	int *cpu_locality; /* CPU relative cache distance */
-	u64 last_niffy; /* Last time this RQ updated grq.niffies */
 #endif /* CONFIG_SMP */
 #ifdef CONFIG_IRQ_TIME_ACCOUNTING
 	u64 prev_irq_time;
@@ -54,7 +68,7 @@ struct rq {
 	u64 prev_steal_time_rq;
 #endif /* CONFIG_PARAVIRT_TIME_ACCOUNTING */
 
-	u64 clock, old_clock, last_tick;
+	u64 clock, last_tick;
 	u64 clock_task;
 	bool dither;
 
@@ -110,13 +124,13 @@ static inline u64 __rq_clock_broken(struct rq *rq)
 
 static inline u64 rq_clock(struct rq *rq)
 {
-	lockdep_assert_held(rq->grq_lock);
+	lockdep_assert_held(&rq->lock);
 	return rq->clock;
 }
 
 static inline u64 rq_clock_task(struct rq *rq)
 {
-	lockdep_assert_held(rq->grq_lock);
+	lockdep_assert_held(&rq->lock);
 	return rq->clock_task;
 }
 
