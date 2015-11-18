@@ -1380,11 +1380,11 @@ struct task_struct {
 	unsigned int flags;	/* per process flags, defined below */
 	unsigned int ptrace;
 
-#if defined(CONFIG_SMP) && !defined(CONFIG_SCHED_BFS)
-	struct llist_node wake_entry;
-#endif
 #if defined(CONFIG_SMP) || defined(CONFIG_SCHED_BFS)
 	int on_cpu;
+#endif
+#if defined(CONFIG_SMP) && !defined(CONFIG_SCHED_BFS)
+	struct llist_node wake_entry;
 #endif
 #ifdef CONFIG_SMP
 	unsigned int wakee_flips;
@@ -1408,6 +1408,7 @@ struct task_struct {
 #endif
 	u64 cached;		/* task cached indicator */
 	u64 cache_scost;/* last switch cost when schedul off a rq */
+	u64 policy_cached_timeout;
 	unsigned long rt_timeout;
 #else /* CONFIG_SCHED_BFS */
 	const struct sched_class *sched_class;

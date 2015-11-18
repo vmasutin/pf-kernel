@@ -138,16 +138,43 @@
 
 void print_scheduler_version(void)
 {
-	printk(KERN_INFO "BFS CPU scheduler v0.463 by Con Kolivas.\n");
-	printk(KERN_INFO "BFS enhancement patchset v4.3_0463_1_vrq0 by Alfred Chen.\n");
+	printk(KERN_INFO "BFS CPU scheduler v0.465 by Con Kolivas.\n");
+	printk(KERN_INFO "BFS enhancement patchset v4.3_0465_2_vrq0 by Alfred Chen.\n");
 }
+
+/* BFS default rr interval in ms */
+#define DEFAULT_RR_INTERVAL (6)
 
 /*
  * This is the time all tasks within the same priority round robin.
  * Value is in ms and set to a minimum of 6ms. Scales with number of cpus.
  * Tunable via /proc interface.
  */
-int rr_interval __read_mostly = 6;
+int rr_interval __read_mostly = DEFAULT_RR_INTERVAL;
+
+/* Unlimited cached task wait time in ms */
+#define UNLIMITED_CACHED_WAITTIME (1000)
+
+/*
+ * Normal policy task cached wait time, based on Preemption Model Kernel config
+ */
+#ifdef CONFIG_PREEMPT_NONE
+#define NORMAL_POLICY_CACHED_WAITTIME UNLIMITED_CACHED_WAITTIME
+#else
+#define NORMAL_POLICY_CACHED_WAITTIME DEFAULT_RR_INTERVAL
+#endif
+
+/*
+ * task policy cached timeout (in ns)
+ */
+static unsigned long policy_cached_timeout[] = {
+	MS_TO_NS(NORMAL_POLICY_CACHED_WAITTIME),	/* NORMAL */
+	MS_TO_NS(DEFAULT_RR_INTERVAL),			/* FIFO */
+	MS_TO_NS(DEFAULT_RR_INTERVAL),			/* RR */
+	MS_TO_NS(UNLIMITED_CACHED_WAITTIME),		/* BATCH */
+	MS_TO_NS(DEFAULT_RR_INTERVAL),			/* ISO */
+	MS_TO_NS(UNLIMITED_CACHED_WAITTIME)		/* IDLE */
+};
 
 /*
  * sched_iso_cpu - sysctl which determines the cpu percentage SCHED_ISO tasks
@@ -230,9 +257,6 @@ static struct root_domain def_root_domain;
 
 #endif /* CONFIG_SMP */
 
-/* cpus with isolated domains */
-cpumask_var_t cpu_isolated_map;
-
 /* There can be only one */
 #ifdef CONFIG_SMP
 static struct global_rq grq ____cacheline_aligned_in_smp;
@@ -241,6 +265,9 @@ static struct global_rq grq ____cacheline_aligned;
 #endif
 
 static DEFINE_MUTEX(sched_hotcpu_mutex);
+
+/* cpus with isolated domains */
+cpumask_var_t cpu_isolated_map;
 
 DEFINE_PER_CPU_SHARED_ALIGNED(struct rq, runqueues);
 #ifdef CONFIG_SMP
@@ -740,52 +767,6 @@ static bool set_nr_if_polling(struct task_struct *p)
 #endif
 #endif
 
-void wake_q_add(struct wake_q_head *head, struct task_struct *task)
-{
-	struct wake_q_node *node = &task->wake_q;
-
-	/*
-	 * Atomically grab the task, if ->wake_q is !nil already it means
-	 * its already queued (either by us or someone else) and will get the
-	 * wakeup due to that.
-	 *
-	 * This cmpxchg() implies a full barrier, which pairs with the write
-	 * barrier implied by the wakeup in wake_up_list().
-	 */
-	if (cmpxchg(&node->next, NULL, WAKE_Q_TAIL))
-		return;
-
-	get_task_struct(task);
-
-	/*
-	 * The head is context local, there can be no concurrency.
-	 */
-	*head->lastp = node;
-	head->lastp = &node->next;
-}
-
-void wake_up_q(struct wake_q_head *head)
-{
-	struct wake_q_node *node = head->first;
-
-	while (node != WAKE_Q_TAIL) {
-		struct task_struct *task;
-
-		task = container_of(node, struct task_struct, wake_q);
-		BUG_ON(!task);
-		/* task can safely be re-inserted now */
-		node = node->next;
-		task->wake_q.next = NULL;
-
-		/*
-		 * wake_up_process() implies a wmb() to pair with the queueing
-		 * in wake_q_add() so as not to miss wakeups.
-		 */
-		wake_up_process(task);
-		put_task_struct(task);
-	}
-}
-
 static void resched_curr(struct rq *rq);
 
 static inline void preempt_rq(struct rq * rq)
@@ -1267,13 +1248,29 @@ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
  */
 static inline void cache_task(struct task_struct *p)
 {
-	if(!rt_task(p))
+	if(!rt_task(p)) {
 		p->cached = 1ULL;
+		p->policy_cached_timeout = p->last_ran +
+			policy_cached_timeout[p->policy];
+	}
 }
 
 static inline bool is_task_cache_cool(struct task_struct *p, struct rq *rq)
 {
 	return (rq->switch_cost - p->cache_scost > rq->cache_scost_threshold);
+}
+
+static inline bool
+is_task_policy_cached_timeout(struct task_struct *p, struct rq *rq)
+{
+	return (rq->clock_task > p->policy_cached_timeout);
+}
+
+static inline bool
+is_task_should_cached_off(struct task_struct *p, struct rq *rq)
+{
+	return is_task_cache_cool(p, rq) ||
+	       is_task_policy_cached_timeout(p, rq);
 }
 
 static unsigned int setup_cache_scost_threshold;
@@ -1775,7 +1772,7 @@ static inline void task_preempt_rq(struct task_struct *p, struct rq * rq)
 			return;
 		}
 
-		 enqueue_preempt_task(preempt, rq);
+		enqueue_preempt_task(preempt, rq);
 
 		grq_unlock();
 	} else
@@ -1796,7 +1793,7 @@ static inline void task_preempt_rq(struct task_struct *p, struct rq * rq)
 		if (p->state == TASK_UNINTERRUPTIBLE) {
 			update_rq_clock(rq);
 			profile_hits(SLEEP_PROFILING, (void *)get_wchan(p),
-						 (rq->clock_task - p->last_ran) >> 20);
+				     (rq->clock_task - p->last_ran) >> 20);
 		}
 	}
 
@@ -2177,8 +2174,7 @@ __fire_sched_out_preempt_notifiers(struct task_struct *curr,
 		notifier->ops->sched_out(notifier, next);
 }
 
-
-static void
+static __always_inline void
 fire_sched_out_preempt_notifiers(struct task_struct *curr,
 				 struct task_struct *next)
 {
@@ -2355,7 +2351,6 @@ context_switch(struct rq *rq, struct task_struct *prev,
 
 	/* Here we just switch the register state and the stack. */
 	switch_to(prev, next, prev);
-
 	barrier();
 
 	/*
@@ -2419,8 +2414,8 @@ static unsigned long nr_uninterruptible(void)
  */
 bool single_task_running(void)
 {
-	return (raw_rq()->rq_running &&
-		(0 == queued_notrunning()));
+	return cpu_rq(smp_processor_id())->rq_running &&
+		(0 == queued_notrunning());
 }
 EXPORT_SYMBOL(single_task_running);
 
@@ -3590,9 +3585,9 @@ task_struct *earliest_deadline_task(struct rq *rq, int cpu, struct task_struct *
 			 * against its deadline when not, based on cpu cache
 			 * locality.
 			 */
-			if (p->cached) {
-				if (is_task_cache_cool(p, task_rq(p)))
-					p->cached = 0ULL;
+			if (p->cached == 1ULL) {
+				if (is_task_should_cached_off(p, task_rq(p)))
+					p->cached = 2ULL;
 				if (scaling_rq(rq) && task_cpu(p) != cpu)
 					continue;
 				dl = p->deadline << locality_diff(p, rq);
@@ -4037,6 +4032,7 @@ static inline void sched_submit_work(struct task_struct *tsk)
 	    (preempt_count() & PREEMPT_ACTIVE) ||
 	    signal_pending_state(tsk->state, tsk))
 		return;
+
 	/*
 	 * If we are going to sleep and we have plugged IO queued,
 	 * make sure to submit it to avoid deadlocks.
@@ -4577,7 +4573,7 @@ static void __setscheduler_params(struct task_struct *p,
 
 /* Actually do priority change: must hold rq lock. */
 static void __setscheduler(struct rq *rq, struct task_struct *p,
-						   const struct sched_attr *attr, bool keep_boost)
+			   const struct sched_attr *attr, bool keep_boost)
 {
 	int oldrtprio = p->rt_priority;
 	int oldprio = p->prio;
@@ -4618,9 +4614,9 @@ static bool check_same_owner(struct task_struct *p)
 	return match;
 }
 
-static int __sched_setscheduler(struct task_struct *p,
-				const struct sched_attr *attr,
-				bool user, bool pi)
+static int
+__sched_setscheduler(struct task_struct *p,
+		     const struct sched_attr *attr, bool user, bool pi)
 {
 	int newprio = MAX_RT_PRIO - 1 - attr->sched_priority;
 	int retval, oldprio, oldpolicy = -1;
@@ -5841,6 +5837,52 @@ int task_can_attach(struct task_struct *p,
 	return ret;
 }
 
+void wake_q_add(struct wake_q_head *head, struct task_struct *task)
+{
+	struct wake_q_node *node = &task->wake_q;
+
+	/*
+	 * Atomically grab the task, if ->wake_q is !nil already it means
+	 * its already queued (either by us or someone else) and will get the
+	 * wakeup due to that.
+	 *
+	 * This cmpxchg() implies a full barrier, which pairs with the write
+	 * barrier implied by the wakeup in wake_up_list().
+	 */
+	if (cmpxchg(&node->next, NULL, WAKE_Q_TAIL))
+		return;
+
+	get_task_struct(task);
+
+	/*
+	 * The head is context local, there can be no concurrency.
+	 */
+	*head->lastp = node;
+	head->lastp = &node->next;
+}
+
+void wake_up_q(struct wake_q_head *head)
+{
+	struct wake_q_node *node = head->first;
+
+	while (node != WAKE_Q_TAIL) {
+		struct task_struct *task;
+
+		task = container_of(node, struct task_struct, wake_q);
+		BUG_ON(!task);
+		/* task can safely be re-inserted now */
+		node = node->next;
+		task->wake_q.next = NULL;
+
+		/*
+		 * wake_up_process() implies a wmb() to pair with the queueing
+		 * in wake_q_add() so as not to miss wakeups.
+		 */
+		wake_up_process(task);
+		put_task_struct(task);
+	}
+}
+
 #ifdef CONFIG_SMP
 #ifdef CONFIG_NO_HZ_COMMON
 void nohz_balance_enter_idle(int cpu)
@@ -6155,14 +6197,14 @@ static void unregister_sched_domain_sysctl(void)
 	if (sd_ctl_dir[0].child)
 		sd_free_ctl_entry(&sd_ctl_dir[0].child);
 }
-#else
+#else /* CONFIG_SCHED_DEBUG && CONFIG_SYSCTL */
 static void register_sched_domain_sysctl(void)
 {
 }
 static void unregister_sched_domain_sysctl(void)
 {
 }
-#endif
+#endif /* CONFIG_SCHED_DEBUG && CONFIG_SYSCTL */
 
 static void set_rq_online(struct rq *rq)
 {
@@ -6287,6 +6329,8 @@ static int sched_cpu_active(struct notifier_block *nfb,
 				      unsigned long action, void *hcpu)
 {
 	switch (action & ~CPU_TASKS_FROZEN) {
+	case CPU_STARTING:
+		return NOTIFY_OK;
 	case CPU_ONLINE:
 		/*
 		 * At this point a starting CPU has marked itself as online via
@@ -6333,9 +6377,6 @@ int __init migration_init(void)
 	return 0;
 }
 early_initcall(migration_init);
-#endif
-
-#ifdef CONFIG_SMP
 
 static cpumask_var_t sched_domains_tmpmask; /* sched_domains_mutex */
 
@@ -7124,7 +7165,7 @@ static int __sdt_alloc(const struct cpumask *cpu_map)
 		for_each_cpu(j, cpu_map) {
 			struct sched_domain *sd;
 
-		       	sd = kzalloc_node(sizeof(struct sched_domain) + cpumask_size(),
+			sd = kzalloc_node(sizeof(struct sched_domain) + cpumask_size(),
 					GFP_KERNEL, cpu_to_node(j));
 			if (!sd)
 				return -ENOMEM;
@@ -7786,6 +7827,12 @@ void normalize_rt_tasks(void)
 
 	read_lock(&tasklist_lock);
 	for_each_process_thread(g, p) {
+		/*
+		 * Only normalize user tasks:
+		 */
+		if (p->flags & PF_KTHREAD)
+			continue;
+
 		if (!rt_task(p) && !iso_task(p)) {
 			/*
 			 * Renice negative nice level userspace
