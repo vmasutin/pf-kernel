@@ -139,7 +139,7 @@
 void print_scheduler_version(void)
 {
 	printk(KERN_INFO "BFS CPU scheduler v0.465 by Con Kolivas.\n");
-	printk(KERN_INFO "BFS enhancement patchset v4.3_0465_2_vrq0 by Alfred Chen.\n");
+	printk(KERN_INFO "BFS enhancement patchset v4.3_0465_2_vrq1 by Alfred Chen.\n");
 }
 
 /* BFS default rr interval in ms */
@@ -1642,7 +1642,7 @@ task_preemptable_rq(struct task_struct *p, int only_preempt_idle)
 
 #ifdef CONFIG_SMT_NICE
 	if (!smt_should_schedule(p, target_cpu))
-		return;
+		return NULL;
 #endif
 	if (likely(can_preempt(p, highest_priodl)))
 		return cpu_rq(target_cpu);
@@ -1919,7 +1919,7 @@ static void try_to_wake_up_local(struct task_struct *p)
 {
 	struct rq *rq = task_rq(p);
 
-	lockdep_assert_held(&rq->lock);
+	lockdep_assert_held(&grq.lock);
 
 	if (!(p->state & TASK_NORMAL))
 		return;
@@ -2414,8 +2414,7 @@ static unsigned long nr_uninterruptible(void)
  */
 bool single_task_running(void)
 {
-	return cpu_rq(smp_processor_id())->rq_running &&
-		(0 == queued_notrunning());
+	return (raw_rq()->rq_running && (0 == queued_notrunning()));
 }
 EXPORT_SYMBOL(single_task_running);
 
@@ -6232,6 +6231,7 @@ static void tasks_cpu_hotplug(int cpu)
 	if (cpu == 0)
 		return;
 
+	read_lock(&tasklist_lock);
 	do_each_thread(t, p) {
 		if (cpumask_test_cpu(cpu, &p->cpus_allowed_master)) {
 			count++;
@@ -6242,6 +6242,7 @@ static void tasks_cpu_hotplug(int cpu)
 			cpumask_set_cpu(0, tsk_cpus_allowed(p));
 		}
 	} while_each_thread(t, p);
+	read_unlock(&tasklist_lock);
 
 	if (count) {
 		printk(KERN_INFO "Renew affinity for %d processes to cpu %d\n",
