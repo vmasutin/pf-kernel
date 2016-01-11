@@ -206,6 +206,7 @@ static u32 tcp_yeah_ssthresh(struct sock *sk)
 	const struct tcp_sock *tp = tcp_sk(sk);
 	struct yeah *yeah = inet_csk_ca(sk);
 	u32 reduction;
+	s32 ssthresh;
 
 	if (yeah->doing_reno_now < TCP_YEAH_RHO) {
 		reduction = yeah->lastQ;
@@ -219,7 +220,11 @@ static u32 tcp_yeah_ssthresh(struct sock *sk)
 	yeah->fast_count = 0;
 	yeah->reno_count = max(yeah->reno_count>>1, 2U);
 
-	return tp->snd_cwnd - reduction;
+	ssthresh = tp->snd_cwnd - reduction;
+	if (ssthresh <= 0)
+		ssthresh = 1;
+
+	return ssthresh;
 }
 
 static struct tcp_congestion_ops tcp_yeah __read_mostly = {
