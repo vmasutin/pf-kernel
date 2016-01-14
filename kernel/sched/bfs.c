@@ -5453,21 +5453,6 @@ SYSCALL_DEFINE1(sched_get_priority_min, int, policy)
 	return ret;
 }
 
-static void
-rq_set_schedule(int cpu, int sched)
-{
-	unsigned long flags;
-	struct rq *rq = cpu_rq(cpu);
-
-	raw_spin_lock_irqsave(&rq->lock, flags);
-	rq->schedulable = sched;
-	if (sched)
-		cpumask_set_cpu(cpu, &grq.cpu_preemptable_mask);
-	else
-		cpumask_clear_cpu(cpu, &grq.cpu_preemptable_mask);
-	raw_spin_unlock_irqrestore(&rq->lock, flags);
-}
-
 /**
  * sys_sched_rr_get_interval - return the default timeslice of a process.
  * @pid: pid of the process.
@@ -7774,6 +7759,7 @@ void task_cputime_adjusted(struct task_struct *p, cputime_t *ut, cputime_t *st)
 	*ut = p->utime;
 	*st = p->stime;
 }
+EXPORT_SYMBOL_GPL(task_cputime_adjusted);
 
 void thread_group_cputime_adjusted(struct task_struct *p, cputime_t *ut, cputime_t *st)
 {
@@ -7949,6 +7935,7 @@ void task_cputime_adjusted(struct task_struct *p, cputime_t *ut, cputime_t *st)
 	task_cputime(p, &cputime.utime, &cputime.stime);
 	cputime_adjust(&cputime, &p->prev_cputime, ut, st);
 }
+EXPORT_SYMBOL_GPL(task_cputime_adjusted);
 
 /*
  * Must be called with siglock held.
