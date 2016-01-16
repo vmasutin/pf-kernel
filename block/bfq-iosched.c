@@ -4408,5 +4408,5 @@ static void __exit bfq_exit(void)
 module_init(bfq_init);
 module_exit(bfq_exit);
 
-MODULE_AUTHOR("Fabio Checconi, Paolo Valente");
+MODULE_AUTHOR("Arianna Avanzini, Fabio Checconi, Paolo Valente");
 MODULE_LICENSE("GPL");
