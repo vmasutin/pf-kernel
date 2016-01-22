@@ -1,7 +1,7 @@
 VERSION = 4
 PATCHLEVEL = 4
 SUBLEVEL = 0
-EXTRAVERSION = -pf1
+EXTRAVERSION = -pf2
 NAME = Forbidden Moderators Discussing
 
 # *DOCUMENTATION*
