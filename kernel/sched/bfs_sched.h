@@ -22,6 +22,7 @@ struct rq {
 	raw_spinlock_t lock;
 
 	struct task_struct *curr, *idle, *stop;
+	struct task_struct *try_preempt_tsk;
 	struct task_struct *preempt_task;
 	struct mm_struct *prev_mm;
 
@@ -41,6 +42,10 @@ struct rq {
 	u64 rq_last_ran;
 	int rq_prio;
 	bool rq_running; /* There is a task running */
+#ifdef CONFIG_SMT_NICE
+	struct mm_struct *rq_mm;
+	int rq_smt_bias; /* Policy/nice level bias across smt siblings */
+#endif
 	/* Accurate timekeeping data */
 	u64 timekeep_clock;
 	unsigned long user_pc, nice_pc, irq_pc, softirq_pc, system_pc,

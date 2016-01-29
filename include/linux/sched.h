@@ -1403,6 +1403,9 @@ struct task_struct {
 	struct list_head run_list;
 	u64 last_ran;
 	u64 sched_time; /* sched_clock time spent running */
+#ifdef CONFIG_SMT_NICE
+	int smt_bias; /* Policy/nice level bias across smt siblings */
+#endif
 	u64 cached;		/* task cached indicator */
 	u64 policy_cached_timeout;
 	unsigned long rt_timeout;
