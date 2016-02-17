@@ -138,7 +138,7 @@
 void print_scheduler_version(void)
 {
 	printk(KERN_INFO "BFS CPU scheduler v0.466 by Con Kolivas.\n");
-	printk(KERN_INFO "BFS enhancement patchset v4.4_0466_vrq2 by Alfred Chen.\n");
+	printk(KERN_INFO "BFS enhancement patchset v4.4_0466_vrq3 by Alfred Chen.\n");
 }
 
 /* BFS default rr interval in ms */
@@ -160,7 +160,7 @@ int rr_interval __read_mostly = DEFAULT_RR_INTERVAL;
 #ifdef CONFIG_PREEMPT_NONE
 #define NORMAL_POLICY_CACHED_WAITTIME UNLIMITED_CACHED_WAITTIME
 #else
-#define NORMAL_POLICY_CACHED_WAITTIME 3
+#define NORMAL_POLICY_CACHED_WAITTIME 6
 #endif
 
 /*
@@ -168,10 +168,10 @@ int rr_interval __read_mostly = DEFAULT_RR_INTERVAL;
  */
 static unsigned long policy_cached_timeout[] = {
 	MS_TO_NS(NORMAL_POLICY_CACHED_WAITTIME),	/* NORMAL */
-	MS_TO_NS(0),			/* FIFO */
-	MS_TO_NS(0),			/* RR */
+	MS_TO_NS(0),					/* FIFO */
+	MS_TO_NS(0),					/* RR */
 	MS_TO_NS(UNLIMITED_CACHED_WAITTIME),		/* BATCH */
-	MS_TO_NS(DEFAULT_RR_INTERVAL),			/* ISO */
+	MS_TO_NS(0),					/* ISO */
 	MS_TO_NS(UNLIMITED_CACHED_WAITTIME)		/* IDLE */
 };
 
@@ -1234,8 +1234,9 @@ void do_set_cpus_allowed(struct task_struct *p, const struct cpumask *new_mask)
 static inline bool cache_task(struct task_struct *p, struct rq *rq,
 			      unsigned long state)
 {
-	if(p->mm) {
+	if(p->mm && !rt_task(p)) {
 		p->cached = state;
+		p->policy_stick_timeout = rq->clock_task + (1ULL << 16);
 		p->policy_cached_timeout = rq->clock_task +
 			policy_cached_timeout[p->policy];
 		return true;
@@ -1247,6 +1248,14 @@ static inline bool
 is_task_policy_cached_timeout(struct task_struct *p, struct rq *rq)
 {
 	return (rq->clock_task > p->policy_cached_timeout);
+}
+
+static inline void
+check_task_stick_off(struct task_struct *p, struct rq *rq)
+{
+	if (unlikely(rq->clock_task > p->policy_stick_timeout)) {
+		p->cached = 1ULL;
+	}
 }
 
 /* return task cache state */
@@ -3491,9 +3500,9 @@ task_struct *earliest_deadline_task(struct rq *rq, int cpu, struct task_struct *
 			tcpu = task_cpu(p);
 
 			if (likely(3ULL == p->cached)) {
+				check_task_stick_off(p, task_rq(p));
 				if(unlikely(tcpu != cpu && scaling_rq(rq)))
 					continue;
-				check_task_cached_off(p, task_rq(p));
 				dl = p->deadline << locality_diff(tcpu, rq);
 			} else if (likely(1ULL == p->cached &&
 					  check_task_cached_off(p, task_rq(p))))
