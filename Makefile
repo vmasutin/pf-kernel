@@ -1,8 +1,8 @@
 VERSION = 4
 PATCHLEVEL = 5
 SUBLEVEL = 0
-EXTRAVERSION =
-NAME = Blurry Fish Butt
+EXTRAVERSION = -pf0
+NAME = Test Messages
 
 # *DOCUMENTATION*
 # To see a list of typical targets execute "make help"
