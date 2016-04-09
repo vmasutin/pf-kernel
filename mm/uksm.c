@@ -1558,12 +1558,12 @@ static int replace_page(struct vm_area_struct *vma, struct page *page,
 		entry = pte_mkspecial(entry);
 	else {
 		get_page(kpage);
-		page_add_anon_rmap(kpage, vma, addr);
+		page_add_anon_rmap(kpage, vma, addr, false);
 	}
 
 	set_pte_at_notify(mm, addr, ptep, entry);
 
-	page_remove_rmap(page);
+	page_remove_rmap(page, false);
 	if (!page_mapped(page))
 		try_to_free_swap(page);
 	put_page(page);
@@ -2049,14 +2049,14 @@ static int try_merge_rmap_item(struct rmap_item *item,
 	}
 
 	get_page(tree_page);
-	page_add_anon_rmap(tree_page, vma, addr);
+	page_add_anon_rmap(tree_page, vma, addr, false);
 
 	flush_cache_page(vma, addr, pte_pfn(*ptep));
 	ptep_clear_flush_notify(vma, addr, ptep);
 	set_pte_at_notify(vma->vm_mm, addr, ptep,
 			  mk_pte(tree_page, vma->vm_page_prot));
 
-	page_remove_rmap(kpage);
+	page_remove_rmap(kpage, false);
 	put_page(kpage);
 
 	pte_unmap_unlock(ptep, ptl);
@@ -5448,7 +5448,7 @@ struct page *ksm_might_need_to_copy(struct page *page,
 
 		SetPageDirty(new_page);
 		__SetPageUptodate(new_page);
-		__set_page_locked(new_page);
+		__SetPageLocked(new_page);
 	}
 
 	return new_page;
