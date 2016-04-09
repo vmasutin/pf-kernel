@@ -1131,6 +1131,7 @@ again:
 			if (unlikely(!page)) {
 				uksm_unmap_zero_page(ptent);
 				continue;
+			}
 
 			if (!PageAnon(page)) {
 				if (pte_dirty(ptent)) {
