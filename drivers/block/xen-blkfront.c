@@ -936,7 +936,7 @@ static int xlvbd_init_blk_queue(struct gendisk *gd, u16 sector_size,
 	} else
 		info->tag_set.queue_depth = BLK_RING_SIZE(info);
 	info->tag_set.numa_node = NUMA_NO_NODE;
-	info->tag_set.flags = BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_SG_MERGE;
+	info->tag_set.flags = BLK_MQ_F_SHOULD_MERGE | BLK_MQ_F_SG_MERGE | BLK_MQ_F_VIRT;
 	info->tag_set.cmd_size = 0;
 	info->tag_set.driver_data = info;
 
@@ -996,7 +996,8 @@ static const char *flush_info(unsigned int feature_flush)
 
 static void xlvbd_flush(struct blkfront_info *info)
 {
-	blk_queue_flush(info->rq, info->feature_flush);
+	blk_queue_write_cache(info->rq, info->feature_flush & REQ_FLUSH,
+				info->feature_flush & REQ_FUA);
 	pr_info("blkfront: %s: %s %s %s %s %s\n",
 		info->gd->disk_name, flush_info(info->feature_flush),
 		"persistent grants:", info->feature_persistent ?
