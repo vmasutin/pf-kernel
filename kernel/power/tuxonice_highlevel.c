@@ -160,7 +160,7 @@ void toi_finish_anything(int hibernate_or_resume)
                 set_cpus_allowed_ptr(current, cpu_all_mask);
                 toi_alloc_print_debug_stats();
                 atomic_inc(&snapshot_device_available);
-                unlock_system_sleep();
+    unlock_system_sleep();
                 release_super_lock();
         }
 
@@ -187,7 +187,7 @@ int toi_start_anything(int hibernate_or_resume)
 
         if (hibernate_or_resume) {
             take_super_lock();
-            lock_system_sleep();
+    lock_system_sleep();
 
                 if (!atomic_add_unless(&snapshot_device_available, -1, 0))
                         goto snapshotdevice_unavailable;
