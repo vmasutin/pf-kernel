@@ -866,9 +866,6 @@ blk_init_allocated_queue(struct request_queue *q, request_fn_proc *rfn,
 	 */
 	blk_queue_make_request(q, blk_queue_bio);
 
-	if (blk_wb_init(q))
-		goto fail;
-
 	q->sg_reserved_size = INT_MAX;
 
 	/* Protect q->elevator from elevator_change */
@@ -1402,6 +1399,7 @@ void blk_requeue_request(struct request_queue *q, struct request *rq)
 	blk_delete_timer(rq);
 	blk_clear_rq_complete(rq);
 	trace_block_rq_requeue(q, rq);
+	blk_wb_requeue(q->rq_wb, rq);
 
 	if (rq->cmd_flags & REQ_QUEUED)
 		blk_queue_end_tag(q, rq);
@@ -2534,6 +2532,9 @@ void blk_start_request(struct request *req)
 {
 	blk_dequeue_request(req);
 
+	req->issue_time = ktime_to_ns(ktime_get());
+	blk_wb_issue(req->q->rq_wb, req);
+
 	/*
 	 * We are now handing the request to the hardware, initialize
 	 * resid_len to full count and add the timeout handler.
@@ -2600,6 +2601,8 @@ bool blk_update_request(struct request *req, int error, unsigned int nr_bytes)
 	int total_bytes;
 
 	trace_block_rq_complete(req->q, req, nr_bytes);
+
+	blk_stat_add(&req->q->rq_stats[rq_data_dir(req)], req);
 
 	if (!req->bio)
 		return false;
@@ -2767,6 +2770,7 @@ void blk_finish_request(struct request *req, int error)
 		blk_unprep_request(req);
 
 	blk_account_io_done(req);
+	blk_wb_done(req->q->rq_wb, req);
 
 	if (req->end_io)
 		req->end_io(req, error);
