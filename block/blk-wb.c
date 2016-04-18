@@ -1,80 +1,60 @@
 /*
- * buffered writeback throttling
+ * buffered writeback throttling. losely based on CoDel. We can't drop
+ * packets for IO scheduling, so the logic is something like this:
+ *
+ * - Monitor latencies in a defined window of time.
+ * - If the minimum latency in the above window exceeds some target, increment
+ *   scaling step and scale down queue depth by a factor of 2x. The monitoring
+ *   window is then shrunk to 100 / sqrt(scaling step + 1).
+ * - For any window where we don't have solid data on what the latencies
+ *   look like, retain status quo.
+ * - If latencies look good, decrement scaling step.
  *
  * Copyright (C) 2016 Jens Axboe
  *
- * Things that need changing:
+ * Things that (may) need changing:
  *
- *	- Auto-detection of optimal wb_percent setting. A lower setting
- *	  is appropriate on rotating storage (wb_percent=15 gives good
- *	  separation, while still getting full bandwidth with wb cache).
+ *	- Different scaling of background/normal/high priority writeback.
+ *	  We may have to violate guarantees for max.
+ *	- We can have mismatches between the stat window and our window.
  *
  */
 #include <linux/kernel.h>
 #include <linux/bio.h>
 #include <linux/blkdev.h>
+#include <trace/events/block.h>
 
 #include "blk.h"
 #include "blk-wb.h"
+#include "blk-stat.h"
+
+enum {
+	/*
+	 * Might need to be higher
+	 */
+	RWB_MAX_DEPTH	= 64,
+
+	/*
+	 * 100msec window
+	 */
+	RWB_WINDOW_NSEC		= 100 * 1000 * 1000ULL,
+
+	/*
+	 * Disregard stats, if we don't meet these minimums
+	 */
+	RWB_MIN_WRITE_SAMPLES	= 3,
+	RWB_MIN_READ_SAMPLES	= 1,
+
+	/*
+	 * Target min latencies, in nsecs
+	 */
+	RWB_ROT_LAT	= 75000000ULL,	/* 75 msec */
+	RWB_NONROT_LAT	= 2000000ULL,	/*   2 msec */
+};
 
 static inline bool rwb_enabled(struct rq_wb *rwb)
 {
 	return rwb && rwb->wb_normal != 0;
-}
-
-void __blk_wb_done(struct rq_wb *rwb)
-{
-	int inflight, limit = rwb->wb_normal;
-
-	/*
-	 * Don't wake anyone up if we are above the normal limit. If
-	 * throttling got disabled (limit == 0) with waiters, ensure
-	 * that we wake them up.
-	 */
-	inflight = atomic_dec_return(&rwb->inflight);
-	if (inflight >= limit) {
-		if (!limit)
-			wake_up_all(&rwb->wait);
-		return;
-	}
-
-	/*
-	 * If the device does caching, we can still flood it with IO
-	 * even at a low depth. If caching is on, delay a bit before
-	 * submitting the next, if we're still purely background
-	 * activity.
-	 */
-	if (test_bit(QUEUE_FLAG_WC, &rwb->q->queue_flags) &&
-	    !atomic_read(rwb->bdp_wait) &&
-	    time_before(jiffies, rwb->last_comp + rwb->cache_delay)) {
-		if (!timer_pending(&rwb->timer))
-			mod_timer(&rwb->timer, jiffies + rwb->cache_delay);
-		return;
-	}
-
-	if (waitqueue_active(&rwb->wait)) {
-		int diff = limit - inflight;
-
-		if (diff >= rwb->wb_idle / 2)
-			wake_up_nr(&rwb->wait, 1);
-	}
-}
-
-/*
- * Called on completion of a request. Note that it's also called when
- * a request is merged, when the request gets freed.
- */
-void blk_wb_done(struct rq_wb *rwb, struct request *rq)
-{
-	if (!(rq->cmd_flags & REQ_BUF_INFLIGHT)) {
-		if (rwb_enabled(rwb)) {
-			const unsigned long cur = jiffies;
-
-			if (cur != rwb->last_comp)
-				rwb->last_comp = cur;
-		}
-	} else
-		__blk_wb_done(rwb);
 }
 
 /*
@@ -99,6 +79,258 @@ static bool atomic_inc_below(atomic_t *v, int below)
 	return true;
 }
 
+static void wb_timestamp(struct rq_wb *rwb, unsigned long *var)
+{
+	if (rwb_enabled(rwb)) {
+		const unsigned long cur = jiffies;
+
+		if (cur != *var)
+			*var = cur;
+	}
+}
+
+void __blk_wb_done(struct rq_wb *rwb)
+{
+	int inflight, limit = rwb->wb_normal;
+
+	/*
+	 * If the device does write back caching, drop further down
+	 * before we wake people up.
+	 */
+	if (test_bit(QUEUE_FLAG_WC, &rwb->q->queue_flags) &&
+	    !atomic_read(rwb->bdp_wait))
+		limit = 0;
+	else
+		limit = rwb->wb_normal;
+
+	/*
+	 * Don't wake anyone up if we are above the normal limit. If
+	 * throttling got disabled (limit == 0) with waiters, ensure
+	 * that we wake them up.
+	 */
+	inflight = atomic_dec_return(&rwb->inflight);
+	if (limit && inflight >= limit) {
+		if (!rwb->wb_max)
+			wake_up_all(&rwb->wait);
+		return;
+	}
+
+	if (waitqueue_active(&rwb->wait)) {
+		int diff = limit - inflight;
+
+		if (!inflight || diff >= rwb->wb_background / 2)
+			wake_up_nr(&rwb->wait, 1);
+	}
+}
+
+/*
+ * Called on completion of a request. Note that it's also called when
+ * a request is merged, when the request gets freed.
+ */
+void blk_wb_done(struct rq_wb *rwb, struct request *rq)
+{
+	if (!rwb)
+		return;
+
+	if (!(rq->cmd_flags & REQ_BUF_INFLIGHT)) {
+		if (rwb->sync_cookie == rq) {
+			rwb->sync_issue = 0;
+			rwb->sync_cookie = NULL;
+		}
+
+		wb_timestamp(rwb, &rwb->last_comp);
+	} else {
+		WARN_ON_ONCE(rq == rwb->sync_cookie);
+		__blk_wb_done(rwb);
+		rq->cmd_flags &= ~REQ_BUF_INFLIGHT;
+	}
+}
+
+static void calc_wb_limits(struct rq_wb *rwb)
+{
+	unsigned int depth;
+
+	if (!rwb->min_lat_nsec) {
+		rwb->wb_max = rwb->wb_normal = rwb->wb_background = 0;
+		return;
+	}
+
+	depth = min_t(unsigned int, RWB_MAX_DEPTH, blk_queue_depth(rwb->q));
+
+	/*
+	 * Reduce max depth by 50%, and re-calculate normal/bg based on that
+	 */
+	rwb->wb_max = 1 + ((depth - 1) >> min(31U, rwb->scale_step));
+	rwb->wb_normal = (rwb->wb_max + 1) / 2;
+	rwb->wb_background = (rwb->wb_max + 3) / 4;
+}
+
+static bool inline stat_sample_valid(struct blk_rq_stat *stat)
+{
+	/*
+	 * We need at least one read sample, and a minimum of
+	 * RWB_MIN_WRITE_SAMPLES. We require some write samples to know
+	 * that it's writes impacting us, and not just some sole read on
+	 * a device that is in a lower power state.
+	 */
+	return stat[0].nr_samples >= 1 &&
+		stat[1].nr_samples >= RWB_MIN_WRITE_SAMPLES;
+}
+
+static u64 rwb_sync_issue_lat(struct rq_wb *rwb)
+{
+	u64 now, issue = ACCESS_ONCE(rwb->sync_issue);
+
+	if (!issue || !rwb->sync_cookie)
+		return 0;
+
+	now = ktime_to_ns(ktime_get());
+	return now - issue;
+}
+
+enum {
+	LAT_OK,
+	LAT_UNKNOWN,
+	LAT_EXCEEDED,
+};
+
+static int __latency_exceeded(struct rq_wb *rwb, struct blk_rq_stat *stat)
+{
+	u64 thislat;
+
+	if (!stat_sample_valid(stat))
+		return LAT_UNKNOWN;
+
+	/*
+	 * If the 'min' latency exceeds our target, step down.
+	 */
+	if (stat[0].min > rwb->min_lat_nsec) {
+		trace_block_wb_lat(stat[0].min);
+		trace_block_wb_stat(stat);
+		return LAT_EXCEEDED;
+	}
+
+	/*
+	 * If our stored sync issue exceeds the window size, or it
+	 * exceeds our min target AND we haven't logged any entries,
+	 * flag the latency as exceeded.
+	 */
+	thislat = rwb_sync_issue_lat(rwb);
+	if (thislat > rwb->win_nsec ||
+	    (thislat > rwb->min_lat_nsec && !stat[0].nr_samples)) {
+		trace_block_wb_lat(thislat);
+		return LAT_EXCEEDED;
+	}
+
+	if (rwb->scale_step)
+		trace_block_wb_stat(stat);
+
+	return LAT_OK;
+}
+
+static int latency_exceeded(struct rq_wb *rwb)
+{
+	struct blk_rq_stat stat[2];
+
+	blk_queue_stat_get(rwb->q, stat);
+
+	return __latency_exceeded(rwb, stat);
+}
+
+static void rwb_trace_step(struct rq_wb *rwb, const char *msg)
+{
+	trace_block_wb_step(msg, rwb->scale_step, rwb->wb_background,
+				rwb->wb_normal, rwb->wb_max);
+}
+
+static void scale_up(struct rq_wb *rwb)
+{
+	/*
+	 * If we're at 0, we can't go lower.
+	 */
+	if (!rwb->scale_step)
+		return;
+
+	rwb->scale_step--;
+	calc_wb_limits(rwb);
+
+	if (waitqueue_active(&rwb->wait))
+		wake_up_all(&rwb->wait);
+
+	rwb_trace_step(rwb, "step up");
+}
+
+static void scale_down(struct rq_wb *rwb)
+{
+	/*
+	 * Stop scaling down when we've hit the limit. This also prevents
+	 * ->scale_step from going to crazy values, if the device can't
+	 * keep up.
+	 */
+	if (rwb->wb_max == 1)
+		return;
+
+	rwb->scale_step++;
+	blk_stat_clear(rwb->q);
+	calc_wb_limits(rwb);
+	rwb_trace_step(rwb, "step down");
+}
+
+static void rwb_arm_timer(struct rq_wb *rwb)
+{
+	unsigned long expires;
+
+	rwb->win_nsec = 1000000000ULL / int_sqrt((rwb->scale_step + 1) * 100);
+	expires = jiffies + nsecs_to_jiffies(rwb->win_nsec);
+	mod_timer(&rwb->window_timer, expires);
+}
+
+static void blk_wb_timer_fn(unsigned long data)
+{
+	struct rq_wb *rwb = (struct rq_wb *) data;
+	int status;
+
+	/*
+	 * If we exceeded the latency target, step down. If we did not,
+	 * step one level up. If we don't know enough to say either exceeded
+	 * or ok, then don't do anything.
+	 */
+	status = latency_exceeded(rwb);
+	switch (status) {
+	case LAT_EXCEEDED:
+		scale_down(rwb);
+		break;
+	case LAT_OK:
+		scale_up(rwb);
+		break;
+	default:
+		break;
+	}
+
+	/*
+	 * Re-arm timer, if we have IO in flight
+	 */
+	if (rwb->scale_step || atomic_read(&rwb->inflight))
+		rwb_arm_timer(rwb);
+}
+
+void blk_wb_update_limits(struct rq_wb *rwb)
+{
+	rwb->scale_step = 0;
+	calc_wb_limits(rwb);
+
+	if (waitqueue_active(&rwb->wait))
+		wake_up_all(&rwb->wait);
+}
+
+static bool close_io(struct rq_wb *rwb)
+{
+	const unsigned long now = jiffies;
+
+	return time_before(now, rwb->last_issue + HZ / 10) ||
+		time_before(now, rwb->last_comp + HZ / 10);
+}
+
 #define REQ_HIPRIO	(REQ_SYNC | REQ_META | REQ_PRIO)
 
 static inline unsigned int get_limit(struct rq_wb *rwb, unsigned long rw)
@@ -114,17 +346,31 @@ static inline unsigned int get_limit(struct rq_wb *rwb, unsigned long rw)
 	 */
 	if ((rw & REQ_HIPRIO) || atomic_read(rwb->bdp_wait))
 		limit = rwb->wb_max;
-	else if (time_before(jiffies, rwb->last_comp + HZ / 10) ||
-		 (rw & REQ_BG)) {
+	else if ((rw & REQ_BG) || close_io(rwb)) {
 		/*
 		 * If less than 100ms since we completed unrelated IO,
 		 * limit us to half the depth for background writeback.
 		 */
-		limit = rwb->wb_idle;
+		limit = rwb->wb_background;
 	} else
 		limit = rwb->wb_normal;
 
 	return limit;
+}
+
+static inline bool may_queue(struct rq_wb *rwb, unsigned long rw)
+{
+	/*
+	 * inc it here even if disabled, since we'll dec it at completion.
+	 * this only happens if the task was sleeping in __blk_wb_wait(),
+	 * and someone turned it off at the same time.
+	 */
+	if (!rwb_enabled(rwb)) {
+		atomic_inc(&rwb->inflight);
+		return true;
+	}
+
+	return atomic_inc_below(&rwb->inflight, get_limit(rwb, rw));
 }
 
 /*
@@ -135,16 +381,14 @@ static void __blk_wb_wait(struct rq_wb *rwb, unsigned long rw, spinlock_t *lock)
 {
 	DEFINE_WAIT(wait);
 
-	if (!timer_pending(&rwb->timer) &&
-	    atomic_inc_below(&rwb->inflight, get_limit(rwb, rw)))
+	if (may_queue(rwb, rw))
 		return;
 
 	do {
 		prepare_to_wait_exclusive(&rwb->wait, &wait,
 						TASK_UNINTERRUPTIBLE);
 
-		if (!timer_pending(&rwb->timer) &&
-		    atomic_inc_below(&rwb->inflight, get_limit(rwb, rw)))
+		if (may_queue(rwb, rw))
 			break;
 
 		if (lock)
@@ -172,81 +416,80 @@ bool blk_wb_wait(struct rq_wb *rwb, struct bio *bio, spinlock_t *lock)
 	 */
 	if (!rwb_enabled(rwb) || !(bio->bi_rw & REQ_WRITE) ||
 	    (bio->bi_rw & REQ_DISCARD))
-		return false;
+		goto no_q;
 
 	/*
 	 * Don't throttle WRITE_ODIRECT
 	 */
 	if ((bio->bi_rw & (REQ_SYNC | REQ_NOIDLE)) == REQ_SYNC)
-		return false;
+		goto no_q;
 
 	__blk_wb_wait(rwb, bio->bi_rw, lock);
+
+	if (!timer_pending(&rwb->window_timer))
+		rwb_arm_timer(rwb);
+
 	return true;
+
+no_q:
+	wb_timestamp(rwb, &rwb->last_issue);
+	return false;
 }
 
-static void calc_wb_limits(struct rq_wb *rwb, unsigned int depth,
-			   unsigned int perc)
+void blk_wb_issue(struct rq_wb *rwb, struct request *rq)
 {
-	/*
-	 * We'll use depth==64 as a reasonable max limit that should be able
-	 * to achieve full device bandwidth anywhere.
-	 */
-	depth = min(64U, depth);
-
-	/*
-	 * Full perf writes are max 'perc' percentage of the depth
-	 */
-	rwb->wb_max = (perc * depth + 1) / 100;
-	if (!rwb->wb_max && perc)
-		rwb->wb_max = 1;
-	rwb->wb_normal = (rwb->wb_max + 1) / 2;
-	rwb->wb_idle = (rwb->wb_max + 3) / 4;
+	if (!rwb_enabled(rwb))
+		return;
+	if (!(rq->cmd_flags & REQ_BUF_INFLIGHT) && !rwb->sync_issue) {
+		rwb->sync_cookie = rq;
+		rwb->sync_issue = rq->issue_time;
+	}
 }
 
-void blk_wb_update_limits(struct rq_wb *rwb, unsigned int depth)
+void blk_wb_requeue(struct rq_wb *rwb, struct request *rq)
 {
-	calc_wb_limits(rwb, depth, rwb->perc);
-	wake_up_all(&rwb->wait);
+	if (!rwb_enabled(rwb))
+		return;
+	if (rq == rwb->sync_cookie) {
+		rwb->sync_issue = 0;
+		rwb->sync_cookie = NULL;
+	}
 }
 
-static void blk_wb_timer(unsigned long data)
-{
-	struct rq_wb *rwb = (struct rq_wb *) data;
-
-	if (waitqueue_active(&rwb->wait))
-		wake_up_nr(&rwb->wait, 1);
-}
-
-#define DEF_WB_PERC		50
-#define DEF_WB_CACHE_DELAY	10000
-
-int blk_wb_init(struct request_queue *q)
+void blk_wb_init(struct request_queue *q)
 {
 	struct rq_wb *rwb;
 
+	/*
+	 * If this fails, we don't get throttling
+	 */
 	rwb = kzalloc(sizeof(*rwb), GFP_KERNEL);
 	if (!rwb)
-		return -ENOMEM;
+		return;
 
 	atomic_set(&rwb->inflight, 0);
 	init_waitqueue_head(&rwb->wait);
-	rwb->last_comp = jiffies;
+	setup_timer(&rwb->window_timer, blk_wb_timer_fn, (unsigned long) rwb);
+	rwb->last_comp = rwb->last_issue = jiffies;
 	rwb->bdp_wait = &q->backing_dev_info.wb.dirty_sleeping;
-	setup_timer(&rwb->timer, blk_wb_timer, (unsigned long) rwb);
-	rwb->perc = DEF_WB_PERC;
-	rwb->cache_delay_usecs = DEF_WB_CACHE_DELAY;
-	rwb->cache_delay = usecs_to_jiffies(rwb->cache_delay);
 	rwb->q = q;
-	blk_wb_update_limits(rwb, blk_queue_depth(q));
+
+	if (blk_queue_nonrot(q))
+		rwb->min_lat_nsec = RWB_NONROT_LAT;
+	else
+		rwb->min_lat_nsec = RWB_ROT_LAT;
+
+	blk_wb_update_limits(rwb);
 	q->rq_wb = rwb;
-	return 0;
 }
 
 void blk_wb_exit(struct request_queue *q)
 {
-	if (q->rq_wb)
-		del_timer_sync(&q->rq_wb->timer);
+	struct rq_wb *rwb = q->rq_wb;
 
-	kfree(q->rq_wb);
-	q->rq_wb = NULL;
+	if (rwb) {
+		del_timer_sync(&rwb->window_timer);
+		kfree(q->rq_wb);
+		q->rq_wb = NULL;
+	}
 }

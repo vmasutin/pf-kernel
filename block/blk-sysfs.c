@@ -350,72 +350,43 @@ static ssize_t queue_poll_store(struct request_queue *q, const char *page,
 
 static ssize_t queue_wb_stats_show(struct request_queue *q, char *page)
 {
-	struct rq_wb *wb = q->rq_wb;
+	struct rq_wb *rwb = q->rq_wb;
 
-	if (!q->rq_wb)
+	if (!rwb)
 		return -EINVAL;
 
-	return sprintf(page, "idle=%d, normal=%d, max=%d, inflight=%d, wait=%d,"
-				" timer=%d, bdp_wait=%d\n", wb->wb_idle,
-					wb->wb_normal, wb->wb_max,
-					atomic_read(&wb->inflight),
-					waitqueue_active(&wb->wait),
-					timer_pending(&wb->timer),
-					atomic_read(wb->bdp_wait));
+	return sprintf(page, "background=%d, normal=%d, max=%d, inflight=%d,"
+				" wait=%d, bdp_wait=%d\n", rwb->wb_background,
+					rwb->wb_normal, rwb->wb_max,
+					atomic_read(&rwb->inflight),
+					waitqueue_active(&rwb->wait),
+					atomic_read(rwb->bdp_wait));
 }
 
-static ssize_t queue_wb_perc_show(struct request_queue *q, char *page)
+static ssize_t queue_wb_lat_show(struct request_queue *q, char *page)
 {
 	if (!q->rq_wb)
 		return -EINVAL;
 
-	return queue_var_show(q->rq_wb->perc, page);
+	return sprintf(page, "%llu\n", q->rq_wb->min_lat_nsec / 1000ULL);
 }
 
-static ssize_t queue_wb_perc_store(struct request_queue *q, const char *page,
-				   size_t count)
+static ssize_t queue_wb_lat_store(struct request_queue *q, const char *page,
+				  size_t count)
 {
-	unsigned long perc;
-	ssize_t ret;
+	u64 val;
+	int err;
 
 	if (!q->rq_wb)
 		return -EINVAL;
 
-	ret = queue_var_store(&perc, page, count);
-	if (ret < 0)
-		return ret;
-	if (perc > 100)
-		return -EINVAL;
+	err = kstrtou64(page, 10, &val);
+	if (err < 0)
+		return err;
 
-	q->rq_wb->perc = perc;
-	blk_wb_update_limits(q->rq_wb, blk_queue_depth(q));
-	return ret;
-}
-
-static ssize_t queue_wb_cache_delay_show(struct request_queue *q, char *page)
-{
-	if (!q->rq_wb)
-		return -EINVAL;
-
-	return queue_var_show(q->rq_wb->cache_delay_usecs, page);
-}
-
-static ssize_t queue_wb_cache_delay_store(struct request_queue *q,
-					  const char *page, size_t count)
-{
-	unsigned long var;
-	ssize_t ret;
-
-	if (!q->rq_wb)
-		return -EINVAL;
-
-	ret = queue_var_store(&var, page, count);
-	if (ret < 0)
-		return ret;
-
-	q->rq_wb->cache_delay_usecs = var;
-	q->rq_wb->cache_delay = usecs_to_jiffies(var);
-	return ret;
+	q->rq_wb->min_lat_nsec = val * 1000ULL;
+	blk_wb_update_limits(q->rq_wb);
+	return count;
 }
 
 static ssize_t queue_wc_show(struct request_queue *q, char *page)
@@ -448,6 +419,26 @@ static ssize_t queue_wc_store(struct request_queue *q, const char *page,
 	spin_unlock_irq(q->queue_lock);
 
 	return count;
+}
+
+static ssize_t print_stat(char *page, struct blk_rq_stat *stat, const char *pre)
+{
+	return sprintf(page, "%s samples=%llu, mean=%lld, min=%lld, max=%lld\n",
+			pre, (long long) stat->nr_samples,
+			(long long) stat->mean, (long long) stat->min,
+			(long long) stat->max);
+}
+
+static ssize_t queue_stats_show(struct request_queue *q, char *page)
+{
+	struct blk_rq_stat stat[2];
+	ssize_t ret;
+
+	blk_queue_stat_get(q, stat);
+
+	ret = print_stat(page, &stat[0], "read :");
+	ret += print_stat(page + ret, &stat[1], "write:");
+	return ret;
 }
 
 static struct queue_sysfs_entry queue_requests_entry = {
@@ -587,19 +578,20 @@ static struct queue_sysfs_entry queue_wc_entry = {
 	.store = queue_wc_store,
 };
 
+static struct queue_sysfs_entry queue_stats_entry = {
+	.attr = {.name = "stats", .mode = S_IRUGO },
+	.show = queue_stats_show,
+};
+
 static struct queue_sysfs_entry queue_wb_stats_entry = {
 	.attr = {.name = "wb_stats", .mode = S_IRUGO },
 	.show = queue_wb_stats_show,
 };
-static struct queue_sysfs_entry queue_wb_cache_delay_entry = {
-	.attr = {.name = "wb_cache_usecs", .mode = S_IRUGO | S_IWUSR },
-	.show = queue_wb_cache_delay_show,
-	.store = queue_wb_cache_delay_store,
-};
-static struct queue_sysfs_entry queue_wb_perc_entry = {
-	.attr = {.name = "wb_percent", .mode = S_IRUGO | S_IWUSR },
-	.show = queue_wb_perc_show,
-	.store = queue_wb_perc_store,
+
+static struct queue_sysfs_entry queue_wb_lat_entry = {
+	.attr = {.name = "wb_lat_usec", .mode = S_IRUGO | S_IWUSR },
+	.show = queue_wb_lat_show,
+	.store = queue_wb_lat_store,
 };
 
 static struct attribute *default_attrs[] = {
@@ -628,9 +620,9 @@ static struct attribute *default_attrs[] = {
 	&queue_random_entry.attr,
 	&queue_poll_entry.attr,
 	&queue_wc_entry.attr,
+	&queue_stats_entry.attr,
 	&queue_wb_stats_entry.attr,
-	&queue_wb_cache_delay_entry.attr,
-	&queue_wb_perc_entry.attr,
+	&queue_wb_lat_entry.attr,
 	NULL,
 };
 
@@ -783,6 +775,8 @@ int blk_register_queue(struct gendisk *disk)
 
 	if (q->mq_ops)
 		blk_mq_register_disk(disk);
+
+	blk_wb_init(q);
 
 	if (!q->request_fn)
 		return 0;
