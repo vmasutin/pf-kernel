@@ -701,8 +701,8 @@ TRACE_EVENT(block_wb_stat,
 		__entry->wnr_samples	= stat[1].nr_samples;
 	),
 
-	TP_printk("read lat: mean=%llu, min=%llu, max=%llu, samples=%llu,"
-		  "write lat: mean=%llu, min=%llu, max=%llu, samples=%llu\n",
+	TP_printk("rmean=%llu, rmin=%llu, rmax=%llu, rsamples=%llu, "
+		  "wmean=%llu, wmin=%llu, wmax=%llu, wsamples=%llu\n",
 		  __entry->rmean, __entry->rmin, __entry->rmax,
 		  __entry->rnr_samples, __entry->wmean, __entry->wmin,
 		  __entry->wmax, __entry->wnr_samples)
@@ -726,27 +726,29 @@ TRACE_EVENT(block_wb_lat,
 		__entry->lat		= lat;
 	),
 
-	TP_printk("Latency %llu\n", (unsigned long long) __entry->lat)
+	TP_printk("latency %llu\n", (unsigned long long) __entry->lat)
 );
 
 /**
  * block_wb_step - trace wb event step
  * @msg: context message
  * @step: the current scale step count
+ * @window: the current monitoring window
  * @bg: the current background queue limit
  * @normal: the current normal writeback limit
  * @max: the current max throughput writeback limit
  */
 TRACE_EVENT(block_wb_step,
 
-	TP_PROTO(const char *msg, unsigned int step, unsigned int bg,
-		 unsigned int normal, unsigned int max),
+	TP_PROTO(const char *msg, unsigned int step, unsigned long window,
+		 unsigned int bg, unsigned int normal, unsigned int max),
 
-	TP_ARGS(msg, step, bg, normal, max),
+	TP_ARGS(msg, step, window, bg, normal, max),
 
 	TP_STRUCT__entry(
 		__field( const char *,	msg 	)
-		__field( unsigned int, step )
+		__field( unsigned int,	step	)
+		__field( unsigned long,	window	)
 		__field( unsigned int,	bg 	)
 		__field( unsigned int,	normal	)
 		__field( unsigned int,	max 	)
@@ -755,14 +757,15 @@ TRACE_EVENT(block_wb_step,
 	TP_fast_assign(
 		__entry->msg		= msg;
 		__entry->step		= step;
+		__entry->window		= window;
 		__entry->bg		= bg;
 		__entry->normal		= normal;
 		__entry->max		= max;
 	),
 
-	TP_printk("%s: step=%u, background=%u, normal=%u, max=%u\n",
-		  __entry->msg, __entry->step, __entry->bg, __entry->normal,
-		  __entry->max)
+	TP_printk("%s: step=%u, window=%lu, background=%u, normal=%u, max=%u\n",
+		  __entry->msg, __entry->step, __entry->window, __entry->bg,
+		  __entry->normal, __entry->max)
 );
 
 #endif /* _TRACE_BLOCK_H */

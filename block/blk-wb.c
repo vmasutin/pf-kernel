@@ -45,6 +45,8 @@ enum {
 	RWB_MIN_WRITE_SAMPLES	= 3,
 	RWB_MIN_READ_SAMPLES	= 1,
 
+	RWB_UNKNOWN_BUMP	= 5,
+
 	/*
 	 * Target min latencies, in nsecs
 	 */
@@ -216,7 +218,7 @@ static int __latency_exceeded(struct rq_wb *rwb, struct blk_rq_stat *stat)
 	 * flag the latency as exceeded.
 	 */
 	thislat = rwb_sync_issue_lat(rwb);
-	if (thislat > rwb->win_nsec ||
+	if (thislat > rwb->cur_win_nsec ||
 	    (thislat > rwb->min_lat_nsec && !stat[0].nr_samples)) {
 		trace_block_wb_lat(thislat);
 		return LAT_EXCEEDED;
@@ -239,8 +241,8 @@ static int latency_exceeded(struct rq_wb *rwb)
 
 static void rwb_trace_step(struct rq_wb *rwb, const char *msg)
 {
-	trace_block_wb_step(msg, rwb->scale_step, rwb->wb_background,
-				rwb->wb_normal, rwb->wb_max);
+	trace_block_wb_step(msg, rwb->scale_step, rwb->cur_win_nsec,
+				rwb->wb_background, rwb->wb_normal, rwb->wb_max);
 }
 
 static void scale_up(struct rq_wb *rwb)
@@ -252,6 +254,8 @@ static void scale_up(struct rq_wb *rwb)
 		return;
 
 	rwb->scale_step--;
+	rwb->unknown_cnt = 0;
+	blk_stat_clear(rwb->q);
 	calc_wb_limits(rwb);
 
 	if (waitqueue_active(&rwb->wait))
@@ -271,6 +275,7 @@ static void scale_down(struct rq_wb *rwb)
 		return;
 
 	rwb->scale_step++;
+	rwb->unknown_cnt = 0;
 	blk_stat_clear(rwb->q);
 	calc_wb_limits(rwb);
 	rwb_trace_step(rwb, "step down");
@@ -280,8 +285,14 @@ static void rwb_arm_timer(struct rq_wb *rwb)
 {
 	unsigned long expires;
 
-	rwb->win_nsec = 1000000000ULL / int_sqrt((rwb->scale_step + 1) * 100);
-	expires = jiffies + nsecs_to_jiffies(rwb->win_nsec);
+	/*
+	 * We should speed this up, using some variant of a fast integer
+	 * inverse square root calculation. Since we only do this for
+	 * every window expiration, it's not a huge deal, though.
+	 */
+	rwb->cur_win_nsec = div_u64(rwb->win_nsec << 4,
+					int_sqrt((rwb->scale_step + 1) << 8));
+	expires = jiffies + nsecs_to_jiffies(rwb->cur_win_nsec);
 	mod_timer(&rwb->window_timer, expires);
 }
 
@@ -302,6 +313,14 @@ static void blk_wb_timer_fn(unsigned long data)
 		break;
 	case LAT_OK:
 		scale_up(rwb);
+		break;
+	case LAT_UNKNOWN:
+		/*
+		 * We had no read samples, start bumping up the write
+		 * depth slowly
+		 */
+		if (++rwb->unknown_cnt >= RWB_UNKNOWN_BUMP)
+			scale_up(rwb);
 		break;
 	default:
 		break;
@@ -479,6 +498,7 @@ void blk_wb_init(struct request_queue *q)
 	else
 		rwb->min_lat_nsec = RWB_ROT_LAT;
 
+	rwb->win_nsec = RWB_WINDOW_NSEC;
 	blk_wb_update_limits(rwb);
 	q->rq_wb = rwb;
 }

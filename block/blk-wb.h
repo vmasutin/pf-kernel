@@ -14,7 +14,10 @@ struct rq_wb {
 	unsigned int wb_max;			/* max throughput writeback */
 	unsigned int scale_step;
 
-	u64 win_nsec;
+	u64 win_nsec;				/* default window size */
+	u64 cur_win_nsec;			/* current window size */
+
+	unsigned int unknown_cnt;
 
 	struct timer_list window_timer;
 
@@ -26,8 +29,8 @@ struct rq_wb {
 	unsigned long min_lat_nsec;
 	atomic_t *bdp_wait;
 	struct request_queue *q;
-	atomic_t inflight;
 	wait_queue_head_t wait;
+	atomic_t inflight;
 };
 
 void __blk_wb_done(struct rq_wb *);
