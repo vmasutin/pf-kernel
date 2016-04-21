@@ -10,10 +10,10 @@
 #include <linux/blktrace_api.h>
 #include <linux/blk-mq.h>
 #include <linux/blk-cgroup.h>
+#include <linux/wb-throttle.h>
 
 #include "blk.h"
 #include "blk-mq.h"
-#include "blk-wb.h"
 
 struct queue_sysfs_entry {
 	struct attribute attr;
@@ -398,7 +398,7 @@ static ssize_t queue_wb_win_store(struct request_queue *q, const char *page,
 		return ret;
 
 	q->rq_wb->win_nsec = val * 1000ULL;
-	blk_wb_update_limits(q->rq_wb);
+	wbt_update_limits(q->rq_wb);
 	return count;
 }
 
@@ -424,7 +424,7 @@ static ssize_t queue_wb_lat_store(struct request_queue *q, const char *page,
 		return ret;
 
 	q->rq_wb->min_lat_nsec = val * 1000ULL;
-	blk_wb_update_limits(q->rq_wb);
+	wbt_update_limits(q->rq_wb);
 	return count;
 }
 
@@ -782,6 +782,43 @@ struct kobj_type blk_queue_ktype = {
 	.default_attrs	= default_attrs,
 	.release	= blk_release_queue,
 };
+
+static void blk_wb_stat_get(void *data, struct blk_rq_stat *stat)
+{
+	blk_queue_stat_get(data, stat);
+}
+
+static void blk_wb_stat_clear(void *data)
+{
+	blk_stat_clear(data);
+}
+
+static struct wb_stat_ops wb_stat_ops = {
+	.get	= blk_wb_stat_get,
+	.clear	= blk_wb_stat_clear,
+};
+
+static void blk_wb_init(struct request_queue *q)
+{
+	struct rq_wb *rwb;
+
+	rwb = wbt_init(&q->backing_dev_info, &wb_stat_ops, q);
+
+	/*
+	 * If this fails, we don't get throttling
+	 */
+	if (IS_ERR(rwb))
+		return;
+
+	if (blk_queue_nonrot(q))
+		rwb->min_lat_nsec = 2000000ULL;
+	else
+		rwb->min_lat_nsec = 75000000ULL;
+
+	wbt_set_queue_depth(rwb, blk_queue_depth(q));
+	wbt_set_write_cache(rwb, test_bit(QUEUE_FLAG_WC, &q->queue_flags));
+	q->rq_wb = rwb;
+}
 
 int blk_register_queue(struct gendisk *disk)
 {
