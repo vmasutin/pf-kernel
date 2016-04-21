@@ -33,13 +33,13 @@
 #include <linux/ratelimit.h>
 #include <linux/pm_runtime.h>
 #include <linux/blk-cgroup.h>
+#include <linux/wb-throttle.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/block.h>
 
 #include "blk.h"
 #include "blk-mq.h"
-#include "blk-wb.h"
 
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_bio_remap);
 EXPORT_TRACEPOINT_SYMBOL_GPL(block_rq_remap);
@@ -881,7 +881,8 @@ blk_init_allocated_queue(struct request_queue *q, request_fn_proc *rfn,
 
 fail:
 	blk_free_flush_queue(q->fq);
-	blk_wb_exit(q);
+	wbt_exit(q->rq_wb);
+	q->rq_wb = NULL;
 	return NULL;
 }
 EXPORT_SYMBOL(blk_init_allocated_queue);
@@ -1397,7 +1398,7 @@ void blk_requeue_request(struct request_queue *q, struct request *rq)
 	blk_delete_timer(rq);
 	blk_clear_rq_complete(rq);
 	trace_block_rq_requeue(q, rq);
-	blk_wb_requeue(q->rq_wb, rq);
+	wbt_requeue(q->rq_wb, &rq->wb_stat);
 
 	if (rq->cmd_flags & REQ_QUEUED)
 		blk_queue_end_tag(q, rq);
@@ -1488,7 +1489,7 @@ void __blk_put_request(struct request_queue *q, struct request *req)
 	/* this is a bio leak */
 	WARN_ON(req->bio != NULL);
 
-	blk_wb_done(q->rq_wb, req);
+	wbt_done(q->rq_wb, &req->wb_stat);
 
 	/*
 	 * Request may not have originated from ll_rw_blk. if not,
@@ -1772,7 +1773,7 @@ static blk_qc_t blk_queue_bio(struct request_queue *q, struct bio *bio)
 	}
 
 get_rq:
-	wb_acct = blk_wb_wait(q->rq_wb, bio, q->queue_lock);
+	wb_acct = wbt_wait(q->rq_wb, bio->bi_rw, q->queue_lock);
 
 	/*
 	 * This sync check and mask will be re-done in init_request_from_bio(),
@@ -1790,14 +1791,14 @@ get_rq:
 	req = get_request(q, rw_flags, bio, GFP_NOIO);
 	if (IS_ERR(req)) {
 		if (wb_acct)
-			__blk_wb_done(q->rq_wb);
+			__wbt_done(q->rq_wb);
 		bio->bi_error = PTR_ERR(req);
 		bio_endio(bio);
 		goto out_unlock;
 	}
 
 	if (wb_acct)
-		req->cmd_flags |= REQ_BUF_INFLIGHT;
+		wbt_mark_tracked(&req->wb_stat);
 
 	/*
 	 * After dropping the lock and possibly sleeping here, our request
@@ -2527,8 +2528,7 @@ void blk_start_request(struct request *req)
 {
 	blk_dequeue_request(req);
 
-	req->issue_time = ktime_to_ns(ktime_get());
-	blk_wb_issue(req->q->rq_wb, req);
+	wbt_issue(req->q->rq_wb, &req->wb_stat);
 
 	/*
 	 * We are now handing the request to the hardware, initialize
@@ -2765,7 +2765,7 @@ void blk_finish_request(struct request *req, int error)
 		blk_unprep_request(req);
 
 	blk_account_io_done(req);
-	blk_wb_done(req->q->rq_wb, req);
+	wbt_done(req->q->rq_wb, &req->wb_stat);
 
 	if (req->end_io)
 		req->end_io(req, error);
