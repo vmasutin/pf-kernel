@@ -2331,7 +2331,6 @@ extern int fsync_no_super(struct block_device *);
 #define FS_FREEZER_ALL (FS_FREEZER_FUSE | FS_FREEZER_NORMAL)
 void freeze_filesystems(int which);
 void thaw_filesystems(int which);
-
 #ifdef CONFIG_FS_DAX
 extern bool blkdev_dax_capable(struct block_device *bdev);
 #else
