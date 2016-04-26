@@ -33,7 +33,7 @@
 #include <linux/ratelimit.h>
 #include <linux/pm_runtime.h>
 #include <linux/blk-cgroup.h>
-#include <linux/wb-throttle.h>
+#include <linux/wbt.h>
 
 #define CREATE_TRACE_POINTS
 #include <trace/events/block.h>
@@ -2770,11 +2770,11 @@ void blk_finish_request(struct request *req, int error)
 		blk_unprep_request(req);
 
 	blk_account_io_done(req);
-	wbt_done(req->q->rq_wb, &req->wb_stat);
 
-	if (req->end_io)
+	if (req->end_io) {
+		wbt_done(req->q->rq_wb, &req->wb_stat);
 		req->end_io(req, error);
-	else {
+	} else {
 		if (blk_bidi_rq(req))
 			__blk_put_request(req->next_rq->q, req->next_rq);
 

@@ -20,11 +20,13 @@
  *
  */
 #include <linux/kernel.h>
-#include <linux/bio.h>
-#include <linux/wb-throttle.h>
-#include <trace/events/block.h>
+#include <linux/blk_types.h>
+#include <linux/slab.h>
+#include <linux/backing-dev.h>
+#include <linux/wbt.h>
 
-#include "blk-stat.h"
+#define CREATE_TRACE_POINTS
+#include <trace/events/wbt.h>
 
 enum {
 	/*
@@ -91,7 +93,7 @@ void __wbt_done(struct rq_wb *rwb)
 	 * If the device does write back caching, drop further down
 	 * before we wake people up.
 	 */
-	if (rwb->wc && !atomic_read(rwb->bdp_wait))
+	if (rwb->wc && !atomic_read(&rwb->bdi->wb.dirty_sleeping))
 		limit = 0;
 	else
 		limit = rwb->wb_normal;
@@ -191,18 +193,6 @@ static int __latency_exceeded(struct rq_wb *rwb, struct blk_rq_stat *stat)
 {
 	u64 thislat;
 
-	if (!stat_sample_valid(stat))
-		return LAT_UNKNOWN;
-
-	/*
-	 * If the 'min' latency exceeds our target, step down.
-	 */
-	if (stat[0].min > rwb->min_lat_nsec) {
-		trace_block_wb_lat(stat[0].min);
-		trace_block_wb_stat(stat);
-		return LAT_EXCEEDED;
-	}
-
 	/*
 	 * If our stored sync issue exceeds the window size, or it
 	 * exceeds our min target AND we haven't logged any entries,
@@ -211,12 +201,24 @@ static int __latency_exceeded(struct rq_wb *rwb, struct blk_rq_stat *stat)
 	thislat = rwb_sync_issue_lat(rwb);
 	if (thislat > rwb->cur_win_nsec ||
 	    (thislat > rwb->min_lat_nsec && !stat[0].nr_samples)) {
-		trace_block_wb_lat(thislat);
+		trace_wbt_lat(rwb->bdi, thislat);
+		return LAT_EXCEEDED;
+	}
+
+	if (!stat_sample_valid(stat))
+		return LAT_UNKNOWN;
+
+	/*
+	 * If the 'min' latency exceeds our target, step down.
+	 */
+	if (stat[0].min > rwb->min_lat_nsec) {
+		trace_wbt_lat(rwb->bdi, stat[0].min);
+		trace_wbt_stat(rwb->bdi, stat);
 		return LAT_EXCEEDED;
 	}
 
 	if (rwb->scale_step)
-		trace_block_wb_stat(stat);
+		trace_wbt_stat(rwb->bdi, stat);
 
 	return LAT_OK;
 }
@@ -231,8 +233,8 @@ static int latency_exceeded(struct rq_wb *rwb)
 
 static void rwb_trace_step(struct rq_wb *rwb, const char *msg)
 {
-	trace_block_wb_step(msg, rwb->scale_step, rwb->cur_win_nsec,
-				rwb->wb_background, rwb->wb_normal, rwb->wb_max);
+	trace_wbt_step(rwb->bdi, msg, rwb->scale_step, rwb->cur_win_nsec,
+			rwb->wb_background, rwb->wb_normal, rwb->wb_max);
 }
 
 static void scale_up(struct rq_wb *rwb)
@@ -353,7 +355,7 @@ static inline unsigned int get_limit(struct rq_wb *rwb, unsigned long rw)
 	 * then use the idle limit, or go to normal if we haven't had
 	 * competing IO for a bit.
 	 */
-	if ((rw & REQ_HIPRIO) || atomic_read(rwb->bdp_wait))
+	if ((rw & REQ_HIPRIO) || atomic_read(&rwb->bdi->wb.dirty_sleeping))
 		limit = rwb->wb_max;
 	else if ((rw & REQ_BG) || close_io(rwb)) {
 		/*
@@ -412,6 +414,23 @@ static void __wbt_wait(struct rq_wb *rwb, unsigned long rw, spinlock_t *lock)
 	finish_wait(&rwb->wait, &wait);
 }
 
+static inline bool wbt_should_throttle(struct rq_wb *rwb, unsigned int rw)
+{
+	/*
+	 * If not a WRITE (or a discard), do nothing
+	 */
+	if (!(rw & REQ_WRITE) || (rw & REQ_DISCARD))
+		return false;
+
+	/*
+	 * Don't throttle WRITE_ODIRECT
+	 */
+	if ((rw & (REQ_SYNC | REQ_NOIDLE)) == REQ_SYNC)
+		return false;
+
+	return true;
+}
+
 /*
  * Returns true if the IO request should be accounted, false if not.
  * May sleep, if we have exceeded the writeback limits. Caller can pass
@@ -420,17 +439,13 @@ static void __wbt_wait(struct rq_wb *rwb, unsigned long rw, spinlock_t *lock)
  */
 bool wbt_wait(struct rq_wb *rwb, unsigned int rw, spinlock_t *lock)
 {
-	/*
-	 * If disabled, or not a WRITE (or a discard), do nothing
-	 */
-	if (!rwb_enabled(rwb) || !(rw & REQ_WRITE) || (rw & REQ_DISCARD))
-		goto no_q;
+	if (!rwb_enabled(rwb))
+		return false;
 
-	/*
-	 * Don't throttle WRITE_ODIRECT
-	 */
-	if ((rw & (REQ_SYNC | REQ_NOIDLE)) == REQ_SYNC)
-		goto no_q;
+	if (!wbt_should_throttle(rwb, rw)) {
+		wb_timestamp(rwb, &rwb->last_issue);
+		return false;
+	}
 
 	__wbt_wait(rwb, rw, lock);
 
@@ -438,10 +453,6 @@ bool wbt_wait(struct rq_wb *rwb, unsigned int rw, spinlock_t *lock)
 		rwb_arm_timer(rwb);
 
 	return true;
-
-no_q:
-	wb_timestamp(rwb, &rwb->last_issue);
-	return false;
 }
 
 void wbt_issue(struct rq_wb *rwb, struct wb_issue_stat *stat)
@@ -496,7 +507,7 @@ struct rq_wb *wbt_init(struct backing_dev_info *bdi, struct wb_stat_ops *ops,
 	rwb->wc = 1;
 	rwb->queue_depth = RWB_MAX_DEPTH;
 	rwb->last_comp = rwb->last_issue = jiffies;
-	rwb->bdp_wait = &bdi->wb.dirty_sleeping;
+	rwb->bdi = bdi;
 	rwb->win_nsec = RWB_WINDOW_NSEC;
 	rwb->stat_ops = ops,
 	rwb->ops_data = ops_data;
