@@ -69,7 +69,7 @@ struct rq_wb {
 	unsigned long last_issue;		/* last non-throttled issue */
 	unsigned long last_comp;		/* last non-throttled comp */
 	unsigned long min_lat_nsec;
-	atomic_t *bdp_wait;
+	struct backing_dev_info *bdi;
 	struct request_queue *q;
 	wait_queue_head_t wait;
 	atomic_t inflight;
@@ -77,6 +77,8 @@ struct rq_wb {
 	struct wb_stat_ops *stat_ops;
 	void *ops_data;
 };
+
+struct backing_dev_info;
 
 void __wbt_done(struct rq_wb *);
 void wbt_done(struct rq_wb *, struct wb_issue_stat *);

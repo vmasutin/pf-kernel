@@ -10,7 +10,7 @@
 #include <linux/blktrace_api.h>
 #include <linux/blk-mq.h>
 #include <linux/blk-cgroup.h>
-#include <linux/wb-throttle.h>
+#include <linux/wbt.h>
 
 #include "blk.h"
 #include "blk-mq.h"
@@ -361,21 +361,6 @@ static ssize_t queue_poll_store(struct request_queue *q, const char *page,
 	return ret;
 }
 
-static ssize_t queue_wb_stats_show(struct request_queue *q, char *page)
-{
-	struct rq_wb *rwb = q->rq_wb;
-
-	if (!rwb)
-		return -EINVAL;
-
-	return sprintf(page, "background=%d, normal=%d, max=%d, inflight=%d,"
-				" wait=%d, bdp_wait=%d\n", rwb->wb_background,
-					rwb->wb_normal, rwb->wb_max,
-					atomic_read(&rwb->inflight),
-					waitqueue_active(&rwb->wait),
-					atomic_read(rwb->bdp_wait));
-}
-
 static ssize_t queue_wb_win_show(struct request_queue *q, char *page)
 {
 	if (!q->rq_wb)
@@ -622,19 +607,14 @@ static struct queue_sysfs_entry queue_stats_entry = {
 	.show = queue_stats_show,
 };
 
-static struct queue_sysfs_entry queue_wb_stats_entry = {
-	.attr = {.name = "wb_stats", .mode = S_IRUGO },
-	.show = queue_wb_stats_show,
-};
-
 static struct queue_sysfs_entry queue_wb_lat_entry = {
-	.attr = {.name = "wb_lat_usec", .mode = S_IRUGO | S_IWUSR },
+	.attr = {.name = "wbt_lat_usec", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_wb_lat_show,
 	.store = queue_wb_lat_store,
 };
 
 static struct queue_sysfs_entry queue_wb_win_entry = {
-	.attr = {.name = "wb_win_usec", .mode = S_IRUGO | S_IWUSR },
+	.attr = {.name = "wbt_window_usec", .mode = S_IRUGO | S_IWUSR },
 	.show = queue_wb_win_show,
 	.store = queue_wb_win_store,
 };
@@ -666,7 +646,6 @@ static struct attribute *default_attrs[] = {
 	&queue_poll_entry.attr,
 	&queue_wc_entry.attr,
 	&queue_stats_entry.attr,
-	&queue_wb_stats_entry.attr,
 	&queue_wb_lat_entry.attr,
 	&queue_wb_win_entry.attr,
 	NULL,

@@ -22,7 +22,7 @@
 #include <linux/sched/sysctl.h>
 #include <linux/delay.h>
 #include <linux/crash_dump.h>
-#include <linux/wb-throttle.h>
+#include <linux/wbt.h>
 
 #include <trace/events/block.h>
 
