@@ -155,14 +155,26 @@ static void calc_wb_limits(struct rq_wb *rwb)
 		return;
 	}
 
-	depth = min_t(unsigned int, RWB_MAX_DEPTH, rwb->queue_depth);
-
 	/*
-	 * Reduce max depth by 50%, and re-calculate normal/bg based on that
+	 * For QD=1 devices, this is a special case. It's important for those
+	 * to have one request ready when one completes, so force a depth of
+	 * 2 for those devices. On the backend, it'll be a depth of 1 anyway,
+	 * since the device can't have more than that in flight.
 	 */
-	rwb->wb_max = 1 + ((depth - 1) >> min(31U, rwb->scale_step));
-	rwb->wb_normal = (rwb->wb_max + 1) / 2;
-	rwb->wb_background = (rwb->wb_max + 3) / 4;
+	if (rwb->queue_depth == 1) {
+		rwb->wb_max = rwb->wb_normal = 2;
+		rwb->wb_background = 1;
+	} else {
+		depth = min_t(unsigned int, RWB_MAX_DEPTH, rwb->queue_depth);
+
+		/*
+		 * Reduce max depth by 50%, and re-calculate normal/bg based on
+		 * that.
+		 */
+		rwb->wb_max = 1 + ((depth - 1) >> min(31U, rwb->scale_step));
+		rwb->wb_normal = (rwb->wb_max + 1) / 2;
+		rwb->wb_background = (rwb->wb_max + 3) / 4;
+	}
 }
 
 static bool inline stat_sample_valid(struct blk_rq_stat *stat)
