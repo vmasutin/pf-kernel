@@ -98,17 +98,22 @@ void __wbt_done(struct rq_wb *rwb)
 	else
 		limit = rwb->wb_normal;
 
-	/*
-	 * Don't wake anyone up if we are above the normal limit. If
-	 * throttling got disabled (limit == 0) with waiters, ensure
-	 * that we wake them up.
-	 */
 	inflight = atomic_dec_return(&rwb->inflight);
-	if (limit && inflight >= limit) {
-		if (!rwb->wb_max)
-			wake_up_all(&rwb->wait);
+
+	/*
+	 * wbt got disabled with IO in flight. Wake up any potential
+	 * waiters, we don't have to do more than that.
+	 */
+	if (!rwb_enabled(rwb)) {
+		wake_up_all(&rwb->wait);
 		return;
 	}
+
+	/*
+	 * Don't wake anyone up if we are above the normal limit.
+	 */
+	if (inflight && inflight >= limit)
+		return;
 
 	if (waitqueue_active(&rwb->wait)) {
 		int diff = limit - inflight;
