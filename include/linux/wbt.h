@@ -56,6 +56,10 @@ struct rq_wb {
 	u64 win_nsec;				/* default window size */
 	u64 cur_win_nsec;			/* current window size */
 
+	/*
+	 * Number of consecutive periods where we don't have enough
+	 * information to make a firm scale up/down decision.
+	 */
 	unsigned int unknown_cnt;
 
 	struct timer_list window_timer;
