@@ -92,6 +92,7 @@ void wbt_exit(struct rq_wb *);
 void wbt_update_limits(struct rq_wb *);
 void wbt_requeue(struct rq_wb *, struct wb_issue_stat *);
 void wbt_issue(struct rq_wb *, struct wb_issue_stat *);
+void wbt_disable(struct rq_wb *);
 
 void wbt_set_queue_depth(struct rq_wb *, unsigned int);
 void wbt_set_write_cache(struct rq_wb *, bool);
