@@ -529,6 +529,13 @@ void wbt_set_write_cache(struct rq_wb *rwb, bool write_cache_on)
 		rwb->wc = write_cache_on;
 }
 
+void wbt_disable(struct rq_wb *rwb)
+{
+	rwb->win_nsec = rwb->min_lat_nsec = 0;
+	wbt_update_limits(rwb);
+}
+EXPORT_SYMBOL_GPL(wbt_disable);
+
 struct rq_wb *wbt_init(struct backing_dev_info *bdi, struct wb_stat_ops *ops,
 		       void *ops_data)
 {
